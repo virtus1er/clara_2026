@@ -3,9 +3,37 @@ project(emotion)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Dépendances
-find_package(Eigen3 REQUIRED)
-find_package(nlohmann_json REQUIRED)
+include(FetchContent)
+
+# Eigen3 - try to find locally first, otherwise fetch
+find_package(Eigen3 QUIET)
+if(NOT Eigen3_FOUND)
+    message(STATUS "Eigen3 not found locally, fetching from GitLab...")
+    FetchContent_Declare(
+        Eigen3
+        GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+    )
+    set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_PKGCONFIG OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(Eigen3)
+endif()
+
+# nlohmann_json - try to find locally first, otherwise fetch
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann_json not found locally, fetching from GitHub...")
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 find_package(Boost REQUIRED COMPONENTS system thread)
 
 # SimpleAmqpClient
