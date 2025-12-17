@@ -1,7 +1,7 @@
 // main.cpp
 // Reçoit 14 dimensions via RabbitMQ, prédit 24 émotions, et envoie les prédictions à la centrale émotionnelle via RabbitMQ
 
-#include <eigen3/Eigen/Dense>
+#include <Eigen/Dense>
 #include <nlohmann/json.hpp>
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <SimpleAmqpClient/Channel.h>
