@@ -1,0 +1,16 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # UI web (Management)
+    environment:
+      RABBITMQ_DEFAULT_USER: "virtus"
+      RABBITMQ_DEFAULT_PASS: "virtus@83"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+volumes:
+  rabbitmq_data:
