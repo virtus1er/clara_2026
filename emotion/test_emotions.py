@@ -19,12 +19,11 @@ INPUT_QUEUE = "dimensions_queue"
 OUTPUT_EXCHANGE = "mcee.emotional.input"
 ROUTING_KEY = "emotions.predictions"
 
-# 14 dimensions expected by the model
+# 14 dimensions expected by the model (from model.json)
 DIMENSIONS = [
-    "Valence", "Activation", "Dominance", "Certitude",
-    "Nouveauté", "Pertinence", "Congruence", "Contrôle",
-    "Agentivité", "Normativité", "Attention", "Effort",
-    "Plaisir intrinsèque", "Signification"
+    "approach", "arousal", "attention", "certainty", "commitment",
+    "control", "dominance", "effort", "fairness", "identity",
+    "obstruction", "safety", "upswing", "valence"
 ]
 
 def get_connection():
@@ -128,76 +127,94 @@ def test_emotion(name: str, dimensions: dict):
 def main():
     print("=== Test du système de prédiction d'émotions ===\n")
 
-    # Test 1: Joie (high valence, high activation)
+    # Test 1: Joie (high valence, high arousal, positive approach)
     test_emotion("Joie", {
-        "Valence": 0.9,
-        "Activation": 0.8,
-        "Dominance": 0.7,
-        "Certitude": 0.8,
-        "Nouveauté": 0.5,
-        "Pertinence": 0.7,
-        "Congruence": 0.8,
-        "Contrôle": 0.7,
-        "Agentivité": 0.6,
-        "Normativité": 0.7,
-        "Attention": 0.6,
-        "Effort": 0.4,
-        "Plaisir intrinsèque": 0.9,
-        "Signification": 0.7
+        "approach": 0.8,
+        "arousal": 0.7,
+        "attention": 0.6,
+        "certainty": 0.8,
+        "commitment": 0.7,
+        "control": 0.7,
+        "dominance": 0.6,
+        "effort": 0.4,
+        "fairness": 0.7,
+        "identity": 0.6,
+        "obstruction": 0.2,
+        "safety": 0.8,
+        "upswing": 0.8,
+        "valence": 0.9
     })
 
-    # Test 2: Tristesse (low valence, low activation)
+    # Test 2: Tristesse (low valence, low arousal)
     test_emotion("Tristesse", {
-        "Valence": 0.2,
-        "Activation": 0.3,
-        "Dominance": 0.3,
-        "Certitude": 0.4,
-        "Nouveauté": 0.2,
-        "Pertinence": 0.6,
-        "Congruence": 0.3,
-        "Contrôle": 0.2,
-        "Agentivité": 0.3,
-        "Normativité": 0.5,
-        "Attention": 0.4,
-        "Effort": 0.3,
-        "Plaisir intrinsèque": 0.1,
-        "Signification": 0.6
+        "approach": 0.2,
+        "arousal": 0.3,
+        "attention": 0.4,
+        "certainty": 0.4,
+        "commitment": 0.3,
+        "control": 0.2,
+        "dominance": 0.2,
+        "effort": 0.3,
+        "fairness": 0.4,
+        "identity": 0.5,
+        "obstruction": 0.7,
+        "safety": 0.3,
+        "upswing": 0.1,
+        "valence": 0.2
     })
 
-    # Test 3: Peur (low valence, high activation)
+    # Test 3: Peur (low valence, high arousal, low safety)
     test_emotion("Peur", {
-        "Valence": 0.2,
-        "Activation": 0.9,
-        "Dominance": 0.2,
-        "Certitude": 0.3,
-        "Nouveauté": 0.8,
-        "Pertinence": 0.9,
-        "Congruence": 0.2,
-        "Contrôle": 0.1,
-        "Agentivité": 0.2,
-        "Normativité": 0.3,
-        "Attention": 0.9,
-        "Effort": 0.8,
-        "Plaisir intrinsèque": 0.1,
-        "Signification": 0.8
+        "approach": 0.2,
+        "arousal": 0.9,
+        "attention": 0.9,
+        "certainty": 0.2,
+        "commitment": 0.4,
+        "control": 0.1,
+        "dominance": 0.1,
+        "effort": 0.8,
+        "fairness": 0.3,
+        "identity": 0.4,
+        "obstruction": 0.8,
+        "safety": 0.1,
+        "upswing": 0.1,
+        "valence": 0.2
     })
 
-    # Test 4: Calme (medium valence, low activation)
+    # Test 4: Calme (medium valence, low arousal, high safety)
     test_emotion("Calme", {
-        "Valence": 0.6,
-        "Activation": 0.2,
-        "Dominance": 0.5,
-        "Certitude": 0.7,
-        "Nouveauté": 0.2,
-        "Pertinence": 0.4,
-        "Congruence": 0.7,
-        "Contrôle": 0.7,
-        "Agentivité": 0.5,
-        "Normativité": 0.6,
-        "Attention": 0.3,
-        "Effort": 0.2,
-        "Plaisir intrinsèque": 0.5,
-        "Signification": 0.4
+        "approach": 0.5,
+        "arousal": 0.2,
+        "attention": 0.3,
+        "certainty": 0.7,
+        "commitment": 0.5,
+        "control": 0.7,
+        "dominance": 0.5,
+        "effort": 0.2,
+        "fairness": 0.6,
+        "identity": 0.5,
+        "obstruction": 0.2,
+        "safety": 0.8,
+        "upswing": 0.5,
+        "valence": 0.6
+    })
+
+    # Test 5: Colère (low valence, high arousal, high dominance)
+    test_emotion("Colère", {
+        "approach": 0.7,
+        "arousal": 0.9,
+        "attention": 0.8,
+        "certainty": 0.7,
+        "commitment": 0.8,
+        "control": 0.3,
+        "dominance": 0.8,
+        "effort": 0.9,
+        "fairness": 0.1,
+        "identity": 0.7,
+        "obstruction": 0.9,
+        "safety": 0.4,
+        "upswing": 0.2,
+        "valence": 0.2
     })
 
     print("\n=== Tests terminés ===")
