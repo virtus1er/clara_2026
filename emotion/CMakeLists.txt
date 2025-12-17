@@ -53,9 +53,9 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-add_executable(emotion_prediction main.cpp)
+add_executable(emotion main.cpp)
 
-target_link_libraries(emotion_prediction PRIVATE
+target_link_libraries(emotion PRIVATE
         Eigen3::Eigen
         nlohmann_json::nlohmann_json
         ${SIMPLE_AMQP_CLIENT_LIBRARY}
