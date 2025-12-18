@@ -17,19 +17,6 @@ endif()
 # Find required packages
 find_package(PkgConfig REQUIRED)
 
-# Find RabbitMQ-C
-pkg_check_modules(RABBITMQ_C REQUIRED librabbitmq)
-
-# Try to find nlohmann/json
-find_package(nlohmann_json 3.2.0 QUIET)
-if(NOT nlohmann_json_FOUND)
-    # Fallback: check if header is available
-    find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
-    if(NOT NLOHMANN_JSON_INCLUDE_DIR)
-        message(FATAL_ERROR "nlohmann/json not found. Install with: sudo apt install nlohmann-json3-dev")
-    endif()
-endif()
-
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -40,12 +27,39 @@ find_path(SIMPLEAMQPCLIENT_INCLUDE_DIR SimpleAmqpClient/SimpleAmqpClient.h
 find_library(SIMPLEAMQPCLIENT_LIBRARY SimpleAmqpClient
         PATHS /usr/local/lib /usr/lib)
 
-if(NOT SIMPLEAMQPCLIENT_INCLUDE_DIR OR NOT SIMPLEAMQPCLIENT_LIBRARY)
-    message(STATUS "SimpleAmqpClient not found, building fallback version...")
-    # Build without SimpleAmqpClient - create a stub version
+# Check for nlohmann/json availability
+find_package(nlohmann_json 3.2.0 QUIET)
+if(NOT nlohmann_json_FOUND)
+    find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+endif()
+
+# Check for RabbitMQ-C availability
+pkg_check_modules(RABBITMQ_C QUIET librabbitmq)
+
+# Decide whether to use stub based on all dependencies
+if(NOT SIMPLEAMQPCLIENT_INCLUDE_DIR OR NOT SIMPLEAMQPCLIENT_LIBRARY OR
+   (NOT nlohmann_json_FOUND AND NOT NLOHMANN_JSON_INCLUDE_DIR) OR
+   NOT RABBITMQ_C_FOUND)
+    message(STATUS "Missing dependencies, building with stub implementation:")
+    if(NOT SIMPLEAMQPCLIENT_INCLUDE_DIR OR NOT SIMPLEAMQPCLIENT_LIBRARY)
+        message(STATUS "  - SimpleAmqpClient not found")
+    endif()
+    if(NOT nlohmann_json_FOUND AND NOT NLOHMANN_JSON_INCLUDE_DIR)
+        message(STATUS "  - nlohmann/json not found")
+    endif()
+    if(NOT RABBITMQ_C_FOUND)
+        message(STATUS "  - librabbitmq not found")
+    endif()
     set(USE_RABBITMQ_STUB TRUE)
 else()
-    message(STATUS "Found SimpleAmqpClient: ${SIMPLEAMQPCLIENT_LIBRARY}")
+    message(STATUS "All dependencies found, building full implementation:")
+    message(STATUS "  - SimpleAmqpClient: ${SIMPLEAMQPCLIENT_LIBRARY}")
+    message(STATUS "  - RabbitMQ-C: ${RABBITMQ_C_LIBRARIES}")
+    if(nlohmann_json_FOUND)
+        message(STATUS "  - nlohmann/json: found via find_package")
+    else()
+        message(STATUS "  - nlohmann/json: ${NLOHMANN_JSON_INCLUDE_DIR}")
+    endif()
     include_directories(${SIMPLEAMQPCLIENT_INCLUDE_DIR})
 endif()
 
@@ -89,18 +103,20 @@ if(NOT USE_RABBITMQ_STUB)
     target_link_libraries(mcee ${SIMPLEAMQPCLIENT_LIBRARY})
 endif()
 
-# Always link RabbitMQ-C if available
-if(RABBITMQ_C_FOUND)
+# Link RabbitMQ-C if not using stub and if found
+if(NOT USE_RABBITMQ_STUB AND RABBITMQ_C_FOUND)
     target_link_libraries(mcee ${RABBITMQ_C_LIBRARIES})
     target_include_directories(mcee PRIVATE ${RABBITMQ_C_INCLUDE_DIRS})
     target_compile_definitions(mcee PRIVATE ${RABBITMQ_C_CFLAGS_OTHER})
 endif()
 
-# Link nlohmann/json if found via find_package
-if(nlohmann_json_FOUND)
-    target_link_libraries(mcee nlohmann_json::nlohmann_json)
-else()
-    target_include_directories(mcee PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+# Link nlohmann/json if not using stub
+if(NOT USE_RABBITMQ_STUB)
+    if(nlohmann_json_FOUND)
+        target_link_libraries(mcee nlohmann_json::nlohmann_json)
+    elseif(NLOHMANN_JSON_INCLUDE_DIR)
+        target_include_directories(mcee PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    endif()
 endif()
 
 # Install target
