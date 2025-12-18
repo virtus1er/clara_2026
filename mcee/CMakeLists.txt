@@ -17,23 +17,10 @@ endif()
 # Find required packages
 find_package(PkgConfig REQUIRED)
 
-# Find RabbitMQ-C
-pkg_check_modules(RABBITMQ_C REQUIRED librabbitmq)
-
-# Try to find nlohmann/json
-find_package(nlohmann_json 3.2.0 QUIET)
-if(NOT nlohmann_json_FOUND)
-    # Fallback: check if header is available
-    find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
-    if(NOT NLOHMANN_JSON_INCLUDE_DIR)
-        message(FATAL_ERROR "nlohmann/json not found. Install with: sudo apt install nlohmann-json3-dev")
-    endif()
-endif()
-
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
-# Try to find SimpleAmqpClient
+# Try to find SimpleAmqpClient first
 find_path(SIMPLEAMQPCLIENT_INCLUDE_DIR SimpleAmqpClient/SimpleAmqpClient.h
         PATHS /usr/local/include /usr/include)
 
@@ -47,6 +34,24 @@ if(NOT SIMPLEAMQPCLIENT_INCLUDE_DIR OR NOT SIMPLEAMQPCLIENT_LIBRARY)
 else()
     message(STATUS "Found SimpleAmqpClient: ${SIMPLEAMQPCLIENT_LIBRARY}")
     include_directories(${SIMPLEAMQPCLIENT_INCLUDE_DIR})
+endif()
+
+# Only require RabbitMQ-C and nlohmann/json if not using stub
+if(NOT USE_RABBITMQ_STUB)
+    # Find RabbitMQ-C
+    pkg_check_modules(RABBITMQ_C REQUIRED librabbitmq)
+
+    # Try to find nlohmann/json
+    find_package(nlohmann_json 3.2.0 QUIET)
+    if(NOT nlohmann_json_FOUND)
+        # Fallback: check if header is available
+        find_path(NLOHMANN_JSON_INCLUDE_DIR nlohmann/json.hpp)
+        if(NOT NLOHMANN_JSON_INCLUDE_DIR)
+            message(FATAL_ERROR "nlohmann/json not found. Install with: sudo apt install nlohmann-json3-dev")
+        endif()
+    endif()
+else()
+    message(STATUS "Using RabbitMQ stub, librabbitmq and nlohmann/json not required")
 endif()
 
 # Source files
@@ -89,18 +94,20 @@ if(NOT USE_RABBITMQ_STUB)
     target_link_libraries(mcee ${SIMPLEAMQPCLIENT_LIBRARY})
 endif()
 
-# Always link RabbitMQ-C if available
-if(RABBITMQ_C_FOUND)
+# Link RabbitMQ-C if not using stub and if found
+if(NOT USE_RABBITMQ_STUB AND RABBITMQ_C_FOUND)
     target_link_libraries(mcee ${RABBITMQ_C_LIBRARIES})
     target_include_directories(mcee PRIVATE ${RABBITMQ_C_INCLUDE_DIRS})
     target_compile_definitions(mcee PRIVATE ${RABBITMQ_C_CFLAGS_OTHER})
 endif()
 
-# Link nlohmann/json if found via find_package
-if(nlohmann_json_FOUND)
-    target_link_libraries(mcee nlohmann_json::nlohmann_json)
-else()
-    target_include_directories(mcee PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+# Link nlohmann/json if not using stub
+if(NOT USE_RABBITMQ_STUB)
+    if(nlohmann_json_FOUND)
+        target_link_libraries(mcee nlohmann_json::nlohmann_json)
+    elseif(NLOHMANN_JSON_INCLUDE_DIR)
+        target_include_directories(mcee PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    endif()
 endif()
 
 # Install target
