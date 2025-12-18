@@ -1,0 +1,57 @@
+#===== mcee_config.txt =====
+# MCEE Configuration File
+# Modulation Contextuelle des Émotions Expérientielles
+# ===================================================
+
+# Coefficients de modulation émotionnelle
+alpha_feedbacks=0.25
+beta_etats_techniques=0.15
+gamma_capteurs_physiques=0.20
+delta_souvenirs_mct=0.35
+epsilon_transition_contexte=0.20
+eta_gradient_danger=0.30
+
+# Coefficients gradients environnementaux
+omega1_gyroscope=0.4
+omega2_volume=0.3
+omega3_temperature=0.2
+omega4_orientation=0.1
+
+# Coefficients stress système
+sigma1_charge_cpu=0.3
+sigma2_utilisation_ram=0.25
+sigma3_temperature_critique=0.35
+sigma4_stabilite_systeme=0.1
+
+# Coefficients gradient danger global
+poids_environnemental=0.4
+poids_stress_systeme=0.3
+poids_trauma_historique=0.2
+poids_instabilite_emotionnelle=0.1
+
+# Seuils adaptatifs
+seuil_amyghaleon=0.85
+seuil_mlt_base=0.65
+seuil_variation_critique=0.7
+
+# Seuils de danger
+seuil_normal_max=0.3
+seuil_surveillance_max=0.6
+seuil_alerte_max=0.8
+seuil_critique_max=0.95
+
+# Performance
+frequence_maj_hz=100
+latence_max_ms=10
+charge_cpu_max=0.15
+
+# RabbitMQ Configuration
+rabbitmq_host=localhost
+rabbitmq_port=5672
+rabbitmq_username=guest
+rabbitmq_password=guest
+queue_emotional_input=mcee.emotional.input
+queue_context_input=mcee.context.input
+queue_consciousness_output=mcee.consciousness.output
+queue_amygdaleon_output=mcee.amygdaleon.output
+queue_mlt_output=mcee.mlt.output
