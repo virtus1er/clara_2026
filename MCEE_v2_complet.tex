@@ -1,0 +1,257 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- Encodage & langue ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+
+% --- Mise en page ---
+\usepackage{geometry}
+\geometry{margin=2.2cm}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+% --- Tables & figures ---
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+
+% --- Code ---
+\usepackage{listings}
+\usepackage{inconsolata}
+\lstdefinestyle{mcee}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{black!20},
+  backgroundcolor=\color{black!2},
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{orange!60!black},
+  showstringspaces=false
+}
+
+% --- Petits helpers ---
+\newcommand{\emoji}[1]{\texorpdfstring{#1}{}}
+
+\title{MCEE --- Résumé Technique pour le Développement\\\large (avec Système de Phases)}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Vue d'ensemble}
+Le \textbf{MCEE} (Modèle Complet d'Évaluation des États) est un système émotionnel complet intégrant :
+\begin{itemize}
+  \item \textbf{24 émotions instantanées} (prédites par le module C++)
+  \item \emoji{🎭} \textbf{Système de phases émotionnelles} (8 phases qui modulent le comportement)
+  \item \textbf{Graphe de mémoire Neo4j} (souvenirs, concepts, traumas)
+  \item \textbf{Mécanismes de fusion et modulation} (adaptatifs selon la phase)
+  \item \textbf{Système d'urgence ``Amyghaleon''} (déclenché selon la phase)
+\end{itemize}
+
+\section{Architecture des composants (avec phases)}
+\subsection{Schéma (ASCII)}
+\begin{lstlisting}[style=mcee]
+┌─────────────────┐
+│   Capteurs      │ → Données environnementales
+│   Feedbacks     │ → Fb_ext (externe), Fb_int (interne)
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│  Module C++     │ → Prédit 24 émotions E_i(t)
+│  (emotion)      │    depuis 14 dimensions
+└────────┬────────┘
+         ↓
+┌─────────────────────────────────────────────────────┐
+│  🎭 Phase Detector                                  │
+│  Détecte la phase émotionnelle actuelle             │
+│                                                      │
+│  Input:  24 émotions                                │
+│  Output: Phase + PhaseConfig (α,β,γ,δ,θ,seuils)    │
+│                                                      │
+│  Phases: SERENITE | JOIE | EXPLORATION | ANXIETE   │
+│          PEUR | TRISTESSE | DEGOUT | CONFUSION      │
+└────────┬────────────────────────────────────────────┘
+         ↓
+┌─────────────────┐
+│  MCEE Engine    │ → Mise à jour E_i(t+1) avec coefficients de phase
+│  (Python)       │    Fusion → E_global(t+1)
+│                 │    Applique les paramètres de la phase active
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│  Neo4j Graphe   │ → Souvenirs, concepts, traumas
+│  Mémoire        │    Activation, oubli, renforcement
+│                 │    Consolidation modulée par phase
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│  Amyghaleon     │ → Réactions d'urgence (seuil selon phase)
+│  (court-circuit)│    Phase PEUR: seuil = 0.50 ⚠️
+│                 │    Phase SERENITE: seuil = 0.85 ✅
+└─────────────────┘
+\end{lstlisting}
+
+\subsection{Flux de données détaillé}
+\begin{enumerate}
+  \item Le module C++ émet 24 émotions \(\rightarrow\) RabbitMQ (\texttt{mcee.emotional.input})
+  \item Le \emph{Phase Detector} reçoit et analyse \(\rightarrow\) détecte la phase actuelle
+  \item Le \emph{Phase Detector} fournit \emph{PhaseConfig} \(\rightarrow\) coefficients adaptés
+  \item Le \emph{MCEE Engine} reçoit :
+  \begin{itemize}
+    \item Les 24 émotions brutes
+    \item La phase actuelle
+    \item Les coefficients \((\alpha,\beta,\gamma,\delta,\theta)\) de la phase
+    \item Les seuils (Amyghaleon, consolidation, etc.)
+  \end{itemize}
+  \item Le \emph{MCEE Engine} applique les formules avec les coefficients de phase
+  \item Neo4j est mis à jour selon les paramètres de phase
+  \item Amyghaleon vérifie le seuil de la phase actuelle
+\end{enumerate}
+
+\section{Système de phases émotionnelles \emoji{🎭}}
+\subsection{Les 8 phases}
+\begin{longtable}{>{\bfseries}p{2.6cm} p{1.4cm} p{2.8cm} p{0.9cm} p{0.9cm} p{0.9cm} p{0.9cm} p{1.6cm} p{4.0cm}}
+\toprule
+Phase & Priorité & Trigger & \(\alpha\) & \(\delta\) & \(\gamma\) & \(\theta\) & Seuil Amyg. & Caractéristiques \\
+\midrule
+\endhead
+SÉRÉNITÉ & 1 & Calme \(>\) 0.5 & 0.25 & 0.30 & 0.12 & 0.10 & 0.85 & Équilibre, apprentissage optimal \\
+JOIE & 2 & Joie \(>\) 0.6 & 0.40 & 0.35 & 0.08 & 0.05 & 0.95 & Euphorie, renforcement positif \\
+EXPLORATION & 2 & Intérêt \(>\) 0.6 & 0.35 & 0.25 & 0.10 & 0.15 & 0.80 & Apprentissage maximal \\
+ANXIÉTÉ & 3 & Anxiété 0.5--0.8 & 0.40 & 0.45 & 0.06 & 0.08 & 0.70 & Hypervigilance, biais négatif \\
+PEUR (\emoji{⚠️}) & 5 & Peur \(>\) 0.8 & 0.60 & 0.70 & 0.02 & 0.02 & 0.50 & \emoji{🚨} URGENCE --- Traumas dominants \\
+TRISTESSE & 3 & Tristesse \(>\) 0.6 & 0.20 & 0.55 & 0.05 & 0.12 & 0.90 & Rumination, introspection \\
+DÉGOÛT & 4 & Dégoût \(>\) 0.6 & 0.50 & 0.40 & 0.08 & 0.08 & 0.75 & Évitement, associations négatives \\
+CONFUSION & 2 & Confusion \(>\) 0.6 & 0.35 & 0.50 & 0.15 & 0.15 & 0.80 & Recherche d'info, incertitude \\
+\bottomrule
+\end{longtable}
+
+\subsection{Transitions entre phases}
+\textbf{Règles de transition :}
+\begin{enumerate}
+  \item \textbf{Priorité} : la phase \textbf{PEUR} (priorité 5) court-circuite toutes les autres
+  \item \textbf{Hysteresis} : marge de 0.15 pour éviter les oscillations
+  \item \textbf{Durée minimale} : 30 secondes avant changement (configurable)
+  \item \textbf{Urgence} : Peur \(>\) 0.85 \textbf{ou} Horreur \(>\) 0.8 \(\rightarrow\) transition immédiate
+\end{enumerate}
+
+\textbf{Exemple de séquence :}
+\begin{lstlisting}[style=mcee]
+SÉRÉNITÉ (120s) → EXPLORATION (45s) → JOIE (60s) → ANXIÉTÉ (35s) → PEUR (15s)
+                                                                        ↓
+                                                              AMYGHALEON ACTIVÉ
+\end{lstlisting}
+
+\subsection{Impact des phases sur le MCEE}
+Chaque phase modifie :
+\begin{itemize}
+  \item \(\alpha,\beta,\gamma,\delta,\theta\) (coefficients MCEE)
+  \item le seuil Amyghaleon (sensibilité aux urgences)
+  \item la consolidation mémoire (force de mémorisation)
+  \item le focus attentionnel (filtrage des stimuli)
+  \item le taux d'apprentissage (vitesse d'adaptation)
+\end{itemize}
+
+\section{Formules clés à implémenter (avec phases)}
+\subsection{Mise à jour des émotions individuelles}
+\[
+E_i(t+1) = E_i(t) + \alpha_{\text{phase}}\cdot Fb_{ext} + \beta_{\text{phase}}\cdot Fb_{int}(t) - \gamma_{\text{phase}}\cdot \Delta t
++ \delta_{\text{phase}}\cdot Influence_{\text{Souvenirs}} + \theta_{\text{phase}}\cdot W_t
+\]
+
+\subsection{Implémentation (extrait Python)}
+\begin{lstlisting}[style=mcee,language=Python]
+class EmotionUpdater:
+    def __init__(self):
+        self.alpha = 0.3
+        self.beta = 0.2
+        self.gamma = 0.1
+        self.delta = 0.4
+        self.theta = 0.1
+
+    def set_coefficients_from_phase(self, phase_config):
+        self.alpha = phase_config['alpha']
+        self.beta  = phase_config['beta']
+        self.gamma = phase_config['gamma']
+        self.delta = phase_config['delta']
+        self.theta = phase_config['theta']
+
+    def update_emotion(self, E_current, fb_ext, fb_int, delta_t,
+                       influence_memories, wisdom):
+        E_next = (E_current +
+                  self.alpha * fb_ext +
+                  self.beta  * fb_int -
+                  self.gamma * delta_t +
+                  self.delta * influence_memories +
+                  self.theta * wisdom)
+        return max(0.0, min(1.0, E_next))
+\end{lstlisting}
+
+\subsection{Variance (détection d'anomalies)}
+\[
+Var_i(t) = \frac{1}{m}\sum_{j=1}^{m}\left(E_i(t) - S_{i,j}\right)^2
+\]
+
+\subsection{Fusion des émotions (stabilisation \texorpdfstring{\(\tanh\)}{tanh})}
+\[
+E_{global}(t+1) = \tanh\left(E_{global}(t) + \sum_i \left(E_i(t+1)\cdot (1 - Var_{global}(t))\right)\right)
+\]
+
+\section{Gestion de la mémoire (Neo4j) --- modulée par phase}
+\subsection{Structure des nœuds}
+\begin{lstlisting}[style=mcee]
+CREATE (s:Souvenir {
+    name: 'Événement X',
+    date: date('2025-12-19'),
+    emotions: [0.7, 0.2, ...],  // 24 valeurs
+    dominant: 'Joie',
+    valence: 0.7,
+    intensity: 0.8,
+    last_activated: datetime(),
+    activation_count: 1,
+    weight: 0.5,
+    type: 'positif',
+    state: 'SouvenirConsolider',
+    phase_at_creation: 'JOIE'
+})
+\end{lstlisting}
+
+\subsection{Seuils Amyghaleon par phase}
+\begin{lstlisting}[style=mcee,language=Python]
+AMYGHALEON_THRESHOLDS = {
+    'SERENITE':    0.85,
+    'JOIE':        0.95,
+    'EXPLORATION': 0.80,
+    'ANXIETE':     0.70,
+    'PEUR':        0.50,
+    'TRISTESSE':   0.90,
+    'DEGOUT':      0.75,
+    'CONFUSION':   0.80
+}
+\end{lstlisting}
+
+\section{Annexe : tableau complet des phases}
+\begin{longtable}{>{\bfseries}p{2.6cm} p{0.9cm} p{0.9cm} p{0.9cm} p{0.9cm} p{0.9cm} p{1.6cm} p{1.6cm} p{1.2cm} p{1.0cm} p{4.2cm}}
+\toprule
+Phase & \(\alpha\) & \(\beta\) & \(\gamma\) & \(\delta\) & \(\theta\) & Seuil Amyg. & Consolidation & Learning & Focus & Comportement \\
+\midrule
+\endhead
+SÉRÉNITÉ & 0.25 & 0.15 & 0.12 & 0.30 & 0.10 & 0.85 & 0.4 & 1.0 & 0.5 & Équilibre, apprentissage optimal \\
+JOIE & 0.40 & 0.25 & 0.08 & 0.35 & 0.05 & 0.95 & 0.5 & 1.3 & 0.3 & Renforcement positif, risque sous-estimé \\
+EXPLORATION & 0.35 & 0.10 & 0.10 & 0.25 & 0.15 & 0.80 & 0.6 & 1.5 & 0.8 & Apprentissage maximal, attention focalisée \\
+ANXIÉTÉ & 0.40 & 0.30 & 0.06 & 0.45 & 0.08 & 0.70 & 0.4 & 0.8 & 0.6 & Hypervigilance, biais négatif \\
+PEUR & 0.60 & 0.45 & 0.02 & 0.70 & 0.02 & 0.50 & 0.8 & 0.3 & 0.95 & URGENCE --- Traumas dominants \\
+TRISTESSE & 0.20 & 0.40 & 0.05 & 0.55 & 0.12 & 0.90 & 0.5 & 0.6 & 0.4 & Rumination, introspection \\
+DÉGOÛT & 0.50 & 0.25 & 0.08 & 0.40 & 0.08 & 0.75 & 0.6 & 0.9 & 0.7 & Évitement, associations négatives \\
+CONFUSION & 0.35 & 0.30 & 0.15 & 0.50 & 0.15 & 0.80 & 0.3 & 0.7 & 0.5 & Recherche info, incertitude \\
+\bottomrule
+\end{longtable}
+
+\end{document}

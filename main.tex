@@ -1,0 +1,166 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{listings}
+\usepackage{enumitem}
+
+\title{Modèle de Décision Instantanée \\ \small{(Mécanisme Amyghaleon)}}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Objectif de la Présentation}
+L’objectif de ce document est de \textbf{présenter une architecture de prise de décision instantanée}, baptisée \textbf{Amyghaleon}, qui repose sur :
+\begin{enumerate}
+    \item \textbf{Un module de détection rapide} (dit " Amyghaleon "), capable d’identifier et d’interpréter des pics émotionnels ou des signaux critiques en temps réel.
+    \item \textbf{Un Graphe de Mémoire} gérant les différents types de souvenirs (court terme, épisodique, procédural, etc.), permettant de repérer rapidement des situations potentiellement dangereuses (traumas) ou pertinentes.
+    \item \textbf{Une fonction de décision} intégrant la sécurité, l’éthique, et l’apprentissage continu, afin de produire la \textbf{meilleure action instantanée} pour un robot ou un système d’IA.
+\end{enumerate}
+
+Grâce à ce modèle, toute entité robotique ou intelligence artificielle peut réagir en quelques millisecondes lorsqu’un événement imprévu survient, tout en tenant compte de ses expériences passées et en respectant des règles de sûreté et d’éthique.
+
+\section{Vue d’Ensemble}
+
+\subsection{Entrées Principales}
+\begin{enumerate}
+    \item \textbf{Stimuli Externes ($S_i$)} :  
+    Données captées (caméra, microphone, capteurs de proximité, etc.).
+    \item \textbf{Feedbacks Internes ($F_i(t)$)} :  
+    État interne du système (niveau de batterie, température, etc.).
+    \item \textbf{Contexte ($C_t$)} :  
+    Position, situation de l’utilisateur, heure de la journée, conditions ambiantes, etc.
+    \item \textbf{État Émotionnel $\{E_i(t)\}$} :  
+    Peut être modélisé comme un vecteur de plusieurs émotions, ou une intensité globale.
+    \item \textbf{Graphe de Mémoire} :  
+    \begin{itemize}
+        \item Contient la Mémoire à Court Terme (MCT), la Mémoire Épisodique (ME), la Mémoire Procédurale (MP), etc.
+        \item Les souvenirs et événements sont reliés par des liens dont le poids reflète la pertinence, l’émotion associée ou l’importance.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Calcul de l’Émission Émotionnelle Globale}
+Un \textbf{modèle d’apprentissage} (par exemple un réseau neuronal léger) calcule à chaque instant \(t\) l’\textbf{émission globale} \(E_t\) :
+
+\[
+E_t = f\Bigl(\{S_i\}, \{F_i(t)\}, C_t, \text{MCT}(t), \text{ME}(t), \text{MP}, S_t; \theta\Bigr)
+\]
+
+\begin{itemize}
+    \item \textbf{\(f\)} agrège les informations des différents capteurs et mémoires pour produire un indice émotionnel ou un jeu d’émotions.
+    \item Les souvenirs en mémoire (notamment les traumas) peuvent influer directement sur la valeur de \(E_t\).
+\end{itemize}
+
+\subsection{Détection Immédiate (Amyghaleon)}
+\begin{enumerate}
+    \item \textbf{Comparaison} : On compare l’émission globale \(E_t\) (et/ou les 14 émotions de base) à des \textbf{seuils critiques} et à des \textbf{souvenirs traumatiques} du Graphe de Mémoire (similarité > seuil).
+    \item \textbf{Réaction Réflexe} :  
+    \begin{itemize}
+        \item Si un signal critique est détecté (peur, colère intense, rappel d’un événement traumatique), le système enclenche une \textbf{action immédiate} (par exemple : arrêter le déplacement, se positionner pour protéger l’environnement, émettre une alerte sonore, etc.).
+        \item Dans le cas contraire, on poursuit l’analyse plus détaillée.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Décision Finale et Sortie}
+Une deuxième fonction \(g\) détermine la \textbf{réponse finale} \(R_t\), en tenant compte de :
+
+\[
+R_t = g\bigl(E_t,\; C_t,\; \{F_i(t)\},\; \text{Graphe de Mémoire},\; S_t;\; \varphi\bigr)
+\]
+
+\begin{itemize}
+    \item \textbf{\(g\)} incorpore les contraintes de \textbf{sécurité}, d’\textbf{éthique} et d’\textbf{apprentissage} (éviter les répétitions d’erreurs, etc.).
+    \item \textbf{Sorties possibles} : déplacements, signaux lumineux/sonores, messages textuels, mise à jour d’autres modules du robot (par exemple, réduction de vitesse, enclenchement du module d’évitement, etc.).
+\end{itemize}
+
+\subsection{Mise à Jour du Graphe de Mémoire}
+Après chaque décision, on met à jour la mémoire :
+\begin{enumerate}
+    \item \textbf{MCT} : stocke brièvement l’événement et l’émotion associée.
+    \item \textbf{Renforcement} : si un souvenir est activé ou recontacté, l’arête associée peut se renforcer.
+    \item \textbf{Transfert} : en fin de journée (ou à un moment programmé), on déplace en Mémoire Épisodique (ME) les événements importants, et on \textbf{oublie} progressivement les moins pertinents.
+    \item \textbf{Marquage Trauma} : si l’événement a été extrêmement négatif (ou dangereux), il devient un \textbf{souvenir traumatique} (oubli quasi nul, fort poids émotionnel).
+\end{enumerate}
+
+\section{Facteurs influençant la Décision Instantanée}
+La prise de décision ne dépend pas seulement de l’émotion instantanée ou des traumas : d’autres facteurs interviennent, comme le niveau d’énergie, l’urgence perçue, la capacité d’anticipation, etc. Tous ces éléments sont passés au crible par le mécanisme \textbf{Amyghaleon} pour dégager la meilleure action à prendre dans l’instant.
+
+\subsection{Ajustement de la Confiance pour une Décision Instantanée Optimale}
+\textit{(Nouveau segment ajouté pour adapter la confiance en fonction de l’historique des décisions.)}
+
+Plutôt que de maintenir une confiance figée, nous introduisons un \textbf{ajustement progressif} en fonction des décisions passées. Concrètement, la confiance évolue selon la formule :
+
+\[
+\text{Confiance}(t+1)
+= \text{Confiance}(t)
++ \eta \,\bigl(r_t - \overline{r}\bigr)
+- \mu \,\Bigl(\text{Confiance}(t) - 0.5\Bigr).
+\]
+
+\begin{itemize}
+    \item \(\eta\) : détermine à quel point la \textbf{réussite instantanée} (exprimée par \(r_t - \overline{r}\)) \textbf{impacte} la confiance.
+    \item \(r_t\) : la récompense ou l’évaluation obtenue à l’instant \(t\).
+    \item \(\overline{r}\) : la \emph{moyenne} (ou référence) des récompenses récentes.
+    \item \(\mu\) : \textbf{facteur de recentrage} vers \(0.5\), évitant que la confiance ne s’éloigne trop vers 0 ou 1.
+\end{itemize}
+
+Ce mécanisme \textbf{empêche l’IA} d’être \textbf{trop sûre d’elle trop rapidement} (risque de rigidité si la confiance s’envole), tout en favorisant une \textbf{adaptation stratégique} : à force de bons résultats, la confiance monte, mais jamais au point d’ignorer le facteur risque. Si les décisions se soldent par un échec, la confiance baisse, incitant l’IA à reconsidérer ses choix futurs.
+
+\section{Schéma Simplifié (Représentation Textuelle)}
+\begin{lstlisting}
++-----------------------------+  
+|   Stimuli Externes {S_i}    |  
+|   Feedback Internes F_i(t)  |  
+|   + Contexte C_t            |  
++--------------+--------------+  
+               |  
+               v  
+       [1] Calcul E_t via f(...)  
+               | (RNN / MLP)  
+               v  
++---------------------------------------------------+  
+|   Verification Amyghaleon (Detection Immediate)   |  
+|    - Compare E_t & souvenirs critiques (traumas)  |  
+|    - Si depasse seuil => Reaction Reflexe (R_t)   |  
+|    - Sinon continue                                |  
++---------------------------------------------------+  
+               |  
+               v  
+       [2] Calcul R_t via g(...)  
+       (Securite, ethique, memoire, etc.)
+               |  
+               v  
++--------------+---------------+  
+|          Sortie (R_t)       |  
+|  (Action, alerte, message,  |  
+|   planification, etc.)      |  
++--------------+---------------+  
+               |  
+               v  
+     [3] Mise a jour du Graphe de Memoire  
+     - MCT, renforcement/dilution des liens  
+     - Transfert MLT (ME) si pertinent  
+     - Marquage "Trauma" si necessaire
+               |  
+               v  
+         (Iteration suivante)  
+\end{lstlisting}
+
+\section{Conclusion}
+Le \textbf{Modèle de Décision Instantanée} conjugue :
+\begin{itemize}
+    \item Un \textbf{calcul émotionnel rapide} (inspiré de l’amygdale),
+    \item Un \textbf{Graphe de Mémoire} qui conserve l’historique des expériences et leur tonalité émotionnelle,
+    \item Une \textbf{prise de décision en temps réel} conforme à des principes de sécurité et d’éthique.
+\end{itemize}
+
+Cette approche permet aux robots ou agents intelligents de \textbf{réagir en quelques millisecondes} face à des situations critiques, tout en bénéficiant d’une \textbf{mémoire riche} (associative, contextuelle) pour moduler leurs actions ultérieures. Le système évolue de manière continue grâce à l’\textbf{apprentissage} et l’\textbf{actualisation} de ses souvenirs, garantissant à la fois \textbf{proactivité} et \textbf{robustesse} dans la gestion d’événements inattendus.
+
+\end{document}
