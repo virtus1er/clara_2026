@@ -1,0 +1,15 @@
+services:
+  ihm3:
+    build: .
+    container_name: neodocjtext
+    ports:
+      - "9980:80"
+    restart: always
+    volumes:
+      - /home/virtus/PycharmProjects/neo4_final_text_2025/:/app
+
+networks:
+  default:
+    external:
+      name: virtus
+
