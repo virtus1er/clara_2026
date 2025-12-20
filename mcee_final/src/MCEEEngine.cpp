@@ -22,6 +22,7 @@ MCEEEngine::MCEEEngine(const RabbitMQConfig& rabbitmq_config)
     std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
     std::cout << "║           MCEE - Modèle Complet d'Évaluation des États       ║\n";
     std::cout << "║                        Version 2.0                            ║\n";
+    std::cout << "║         Avec intégration Module Émotions + Parole            ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
 
@@ -45,7 +46,17 @@ MCEEEngine::MCEEEngine(const RabbitMQConfig& rabbitmq_config)
         }
     );
 
-    std::cout << "[MCEEEngine] Moteur initialisé avec système de phases\n";
+    // Configurer le callback d'urgence du module parole
+    speech_input_.setUrgencyCallback(
+        [this](const std::string& text, double urgency) {
+            std::cout << "[MCEEEngine] ⚠ Urgence détectée dans le texte (score=" 
+                      << std::fixed << std::setprecision(2) << urgency << ")\n";
+            // Augmenter le feedback interne en cas d'urgence textuelle
+            current_feedback_.internal = std::max(current_feedback_.internal, urgency * 0.5);
+        }
+    );
+
+    std::cout << "[MCEEEngine] Moteur initialisé avec système de phases + parole\n";
 }
 
 MCEEEngine::~MCEEEngine() {
@@ -65,11 +76,16 @@ bool MCEEEngine::start() {
     }
 
     running_.store(true);
-    consumer_thread_ = std::thread(&MCEEEngine::consumeLoop, this);
+    
+    // Démarrer les threads de consommation
+    emotions_consumer_thread_ = std::thread(&MCEEEngine::emotionsConsumeLoop, this);
+    speech_consumer_thread_ = std::thread(&MCEEEngine::speechConsumeLoop, this);
 
     std::cout << "[MCEEEngine] ✓ Démarré et en attente de messages RabbitMQ\n";
-    std::cout << "[MCEEEngine] Exchange: " << rabbitmq_config_.input_exchange << "\n";
-    std::cout << "[MCEEEngine] Routing Key: " << rabbitmq_config_.input_routing_key << "\n\n";
+    std::cout << "[MCEEEngine] Émotions: " << rabbitmq_config_.emotions_exchange 
+              << " / " << rabbitmq_config_.emotions_routing_key << "\n";
+    std::cout << "[MCEEEngine] Parole: " << rabbitmq_config_.speech_exchange 
+              << " / " << rabbitmq_config_.speech_routing_key << "\n\n";
 
     return true;
 }
@@ -81,8 +97,12 @@ void MCEEEngine::stop() {
 
     running_.store(false);
 
-    if (consumer_thread_.joinable()) {
-        consumer_thread_.join();
+    if (emotions_consumer_thread_.joinable()) {
+        emotions_consumer_thread_.join();
+    }
+    
+    if (speech_consumer_thread_.joinable()) {
+        speech_consumer_thread_.join();
     }
 
     std::cout << "[MCEEEngine] Arrêté\n";
@@ -91,6 +111,9 @@ void MCEEEngine::stop() {
     std::cout << "  - Urgences déclenchées: " << stats_.emergency_triggers << "\n";
     std::cout << "  - Souvenirs créés: " << memory_manager_.getMemoryCount() << "\n";
     std::cout << "  - Traumas: " << memory_manager_.getTraumaCount() << "\n";
+    std::cout << "  - Textes traités: " << speech_input_.getProcessedCount() << "\n";
+    std::cout << "  - Sentiment moyen: " << std::fixed << std::setprecision(2) 
+              << speech_input_.getAverageSentiment() << "\n";
 }
 
 bool MCEEEngine::initRabbitMQ() {
@@ -105,31 +128,59 @@ bool MCEEEngine::initRabbitMQ() {
 
         channel_ = AmqpClient::Channel::Open(opts);
 
-        // Déclarer les exchanges
+        // === Exchanges ===
+        
+        // Exchange pour les émotions (entrée)
         channel_->DeclareExchange(
-            rabbitmq_config_.input_exchange,
+            rabbitmq_config_.emotions_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
+        // Exchange pour la parole (entrée)
+        channel_->DeclareExchange(
+            rabbitmq_config_.speech_exchange,
+            AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
+            false, true, false
+        );
+
+        // Exchange pour la sortie
         channel_->DeclareExchange(
             rabbitmq_config_.output_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
-        // Déclarer et binder la queue d'entrée
-        std::string queue_name = channel_->DeclareQueue("mcee_input_queue", false, true, false, false);
+        // === Queues ===
+        
+        // Queue pour les émotions
+        std::string emotions_queue = channel_->DeclareQueue(
+            "mcee_emotions_queue", false, true, false, false
+        );
         channel_->BindQueue(
-            queue_name,
-            rabbitmq_config_.input_exchange,
-            rabbitmq_config_.input_routing_key
+            emotions_queue,
+            rabbitmq_config_.emotions_exchange,
+            rabbitmq_config_.emotions_routing_key
+        );
+        emotions_consumer_tag_ = channel_->BasicConsume(
+            emotions_queue, "", true, false, false, 1
         );
 
-        // Démarrer la consommation
-        consumer_tag_ = channel_->BasicConsume(queue_name, "", true, false, false, 1);
+        // Queue pour la parole
+        std::string speech_queue = channel_->DeclareQueue(
+            "mcee_speech_queue", false, true, false, false
+        );
+        channel_->BindQueue(
+            speech_queue,
+            rabbitmq_config_.speech_exchange,
+            rabbitmq_config_.speech_routing_key
+        );
+        speech_consumer_tag_ = channel_->BasicConsume(
+            speech_queue, "", true, false, false, 1
+        );
 
         std::cout << "[MCEEEngine] Connexion RabbitMQ établie\n";
+        std::cout << "[MCEEEngine] Queues créées: emotions + speech\n";
         return true;
 
     } catch (const std::exception& e) {
@@ -138,30 +189,53 @@ bool MCEEEngine::initRabbitMQ() {
     }
 }
 
-void MCEEEngine::consumeLoop() {
-    std::cout << "[MCEEEngine] Boucle de consommation démarrée\n";
+void MCEEEngine::emotionsConsumeLoop() {
+    std::cout << "[MCEEEngine] Boucle de consommation des émotions démarrée\n";
 
     while (running_.load()) {
         try {
             AmqpClient::Envelope::ptr_t envelope;
-            bool received = channel_->BasicConsumeMessage(consumer_tag_, envelope, 500);
+            bool received = channel_->BasicConsumeMessage(emotions_consumer_tag_, envelope, 500);
 
             if (received && envelope) {
                 std::string body(envelope->Message()->Body().begin(),
                                 envelope->Message()->Body().end());
                 
-                handleMessage(body);
+                handleEmotionMessage(body);
                 channel_->BasicAck(envelope);
             }
 
         } catch (const std::exception& e) {
-            std::cerr << "[MCEEEngine] Erreur consommation: " << e.what() << "\n";
+            std::cerr << "[MCEEEngine] Erreur consommation émotions: " << e.what() << "\n";
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 }
 
-void MCEEEngine::handleMessage(const std::string& body) {
+void MCEEEngine::speechConsumeLoop() {
+    std::cout << "[MCEEEngine] Boucle de consommation de la parole démarrée\n";
+
+    while (running_.load()) {
+        try {
+            AmqpClient::Envelope::ptr_t envelope;
+            bool received = channel_->BasicConsumeMessage(speech_consumer_tag_, envelope, 500);
+
+            if (received && envelope) {
+                std::string body(envelope->Message()->Body().begin(),
+                                envelope->Message()->Body().end());
+                
+                handleSpeechMessage(body);
+                channel_->BasicAck(envelope);
+            }
+
+        } catch (const std::exception& e) {
+            std::cerr << "[MCEEEngine] Erreur consommation parole: " << e.what() << "\n";
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+}
+
+void MCEEEngine::handleEmotionMessage(const std::string& body) {
     try {
         json input = json::parse(body);
         
@@ -177,7 +251,42 @@ void MCEEEngine::handleMessage(const std::string& body) {
         processEmotions(raw_emotions);
 
     } catch (const std::exception& e) {
-        std::cerr << "[MCEEEngine] Erreur parsing JSON: " << e.what() << "\n";
+        std::cerr << "[MCEEEngine] Erreur parsing JSON émotions: " << e.what() << "\n";
+    }
+}
+
+void MCEEEngine::handleSpeechMessage(const std::string& body) {
+    try {
+        json input = json::parse(body);
+        
+        std::string text = input.value("text", "");
+        std::string source = input.value("source", "user");
+        double confidence = input.value("confidence", 1.0);
+
+        if (!text.empty()) {
+            TextInput text_input;
+            text_input.text = text;
+            text_input.source = source;
+            text_input.confidence = confidence;
+            
+            // Traiter le texte
+            last_speech_analysis_ = speech_input_.processText(text_input);
+            
+            // Mettre à jour le feedback externe basé sur le texte
+            double fb_ext = speech_input_.computeFeedbackExternal(last_speech_analysis_);
+            
+            {
+                std::lock_guard<std::mutex> lock(state_mutex_);
+                // Combiner avec le feedback existant (moyenne pondérée)
+                current_feedback_.external = current_feedback_.external * 0.3 + fb_ext * 0.7;
+            }
+
+            std::cout << "[MCEEEngine] Texte traité, feedback externe ajusté: " 
+                      << std::fixed << std::setprecision(2) << current_feedback_.external << "\n";
+        }
+
+    } catch (const std::exception& e) {
+        std::cerr << "[MCEEEngine] Erreur parsing JSON parole: " << e.what() << "\n";
     }
 }
 
@@ -192,6 +301,30 @@ void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& 
 
     // Exécuter le pipeline complet
     processPipeline(raw_emotions);
+}
+
+void MCEEEngine::processSpeechText(const std::string& text, const std::string& source) {
+    // Traiter le texte via SpeechInput
+    last_speech_analysis_ = speech_input_.processText(text, source);
+    
+    // Mettre à jour le feedback externe
+    double fb_ext = speech_input_.computeFeedbackExternal(last_speech_analysis_);
+    
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        current_feedback_.external = current_feedback_.external * 0.3 + fb_ext * 0.7;
+    }
+    
+    // Créer un contexte pour le souvenir si le texte est significatif
+    if (std::abs(last_speech_analysis_.sentiment_score) > 0.3 || 
+        last_speech_analysis_.urgency_score > 0.5) {
+        std::string context = speech_input_.generateMemoryContext(last_speech_analysis_);
+        memory_manager_.recordMemory(current_state_, phase_detector_.getCurrentPhase(), context);
+    }
+
+    std::cout << "[MCEEEngine] Texte traité: sentiment=" 
+              << std::fixed << std::setprecision(2) << last_speech_analysis_.sentiment_score
+              << ", fb_ext=" << current_feedback_.external << "\n";
 }
 
 void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& raw_emotions) {

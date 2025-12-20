@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(mcee_final VERSION 2.0 LANGUAGES CXX)
+project(mcee VERSION 2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,7 @@ set(MCEE_SOURCES
     src/EmotionUpdater.cpp
     src/Amyghaleon.cpp
     src/MemoryManager.cpp
+    src/SpeechInput.cpp
 )
 
 set(MCEE_HEADERS
@@ -60,6 +61,7 @@ set(MCEE_HEADERS
     include/Amyghaleon.hpp
     include/MemoryManager.hpp
     include/PhaseConfig.hpp
+    include/SpeechInput.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})

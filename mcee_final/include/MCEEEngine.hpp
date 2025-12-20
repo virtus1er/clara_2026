@@ -20,6 +20,7 @@
 #include "EmotionUpdater.hpp"
 #include "Amyghaleon.hpp"
 #include "MemoryManager.hpp"
+#include "SpeechInput.hpp"
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -41,8 +42,16 @@ struct RabbitMQConfig {
     int port = 5672;
     std::string user = "virtus";
     std::string password = "virtus@83";
-    std::string input_exchange = "mcee.emotional.input";
-    std::string input_routing_key = "emotions.predictions";
+    
+    // Entrée émotions (depuis module emotion C++)
+    std::string emotions_exchange = "mcee.emotional.input";
+    std::string emotions_routing_key = "emotions.predictions";
+    
+    // Entrée parole (depuis module speech)
+    std::string speech_exchange = "mcee.speech.input";
+    std::string speech_routing_key = "speech.text";
+    
+    // Sortie état MCEE
     std::string output_exchange = "mcee.emotional.output";
     std::string output_routing_key = "mcee.state";
 };
@@ -93,9 +102,21 @@ public:
     void processEmotions(const std::unordered_map<std::string, double>& raw_emotions);
 
     /**
+     * @brief Traite un texte reçu du module de parole
+     * @param text Texte à traiter
+     * @param source Source du texte (user, environment, system)
+     */
+    void processSpeechText(const std::string& text, const std::string& source = "user");
+
+    /**
      * @brief Définit les feedbacks externes/internes
      */
     void setFeedback(double external, double internal);
+
+    /**
+     * @brief Retourne le gestionnaire de parole
+     */
+    SpeechInput& getSpeechInput() { return speech_input_; }
 
     /**
      * @brief Définit le callback pour les changements d'état
@@ -150,21 +171,25 @@ private:
     EmotionUpdater emotion_updater_;
     Amyghaleon amyghaleon_;
     MemoryManager memory_manager_;
+    SpeechInput speech_input_;
 
     // État
     EmotionalState current_state_;
     EmotionalState previous_state_;
     Feedback current_feedback_;
+    SpeechAnalysis last_speech_analysis_;
     double wisdom_ = 0.0;
     MCEEStats stats_;
 
     // RabbitMQ
     AmqpClient::Channel::ptr_t channel_;
-    std::string consumer_tag_;
+    std::string emotions_consumer_tag_;
+    std::string speech_consumer_tag_;
 
     // Threading
     std::atomic<bool> running_{false};
-    std::thread consumer_thread_;
+    std::thread emotions_consumer_thread_;
+    std::thread speech_consumer_thread_;
     std::mutex state_mutex_;
     StateCallback on_state_change_;
 
@@ -177,15 +202,26 @@ private:
     bool initRabbitMQ();
 
     /**
-     * @brief Boucle de consommation des messages RabbitMQ
+     * @brief Boucle de consommation des émotions RabbitMQ
      */
-    void consumeLoop();
+    void emotionsConsumeLoop();
 
     /**
-     * @brief Traite un message RabbitMQ
+     * @brief Boucle de consommation des textes RabbitMQ
+     */
+    void speechConsumeLoop();
+
+    /**
+     * @brief Traite un message d'émotion RabbitMQ
      * @param body Corps du message (JSON)
      */
-    void handleMessage(const std::string& body);
+    void handleEmotionMessage(const std::string& body);
+
+    /**
+     * @brief Traite un message de parole RabbitMQ
+     * @param body Corps du message (JSON)
+     */
+    void handleSpeechMessage(const std::string& body);
 
     /**
      * @brief Pipeline de traitement MCEE complet

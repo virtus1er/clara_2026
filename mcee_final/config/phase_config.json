@@ -108,10 +108,19 @@
     "port": 5672,
     "user": "virtus",
     "password": "virtus@83",
-    "input_exchange": "mcee.emotional.input",
-    "input_routing_key": "emotions.predictions",
+    "emotions_exchange": "mcee.emotional.input",
+    "emotions_routing_key": "emotions.predictions",
+    "speech_exchange": "mcee.speech.input",
+    "speech_routing_key": "speech.text",
     "output_exchange": "mcee.emotional.output",
     "output_routing_key": "mcee.state"
+  },
+  "speech": {
+    "language": "fr",
+    "sentiment_weight": 0.7,
+    "arousal_weight": 0.3,
+    "urgency_threshold": 0.7,
+    "memory_record_threshold": 0.3
   },
   "memory": {
     "max_memories": 1000,

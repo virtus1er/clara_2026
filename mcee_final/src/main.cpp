@@ -39,10 +39,10 @@ void printUsage(const char* program) {
 }
 
 void runDemo(MCEEEngine& engine) {
-    std::cout << "\n[Demo] Mode démonstration - simulation d'émotions\n\n";
+    std::cout << "\n[Demo] Mode démonstration - simulation d'émotions et parole\n\n";
 
-    // Scénario 1: État calme (SÉRÉNITÉ)
-    std::cout << "═══ Scénario 1: État calme ═══\n";
+    // Scénario 1: État calme (SÉRÉNITÉ) + texte positif
+    std::cout << "═══ Scénario 1: État calme + parole positive ═══\n";
     std::unordered_map<std::string, double> calm_state;
     for (const auto& name : EMOTION_NAMES) {
         calm_state[name] = 0.1;
@@ -51,10 +51,11 @@ void runDemo(MCEEEngine& engine) {
     calm_state["Satisfaction"] = 0.6;
     calm_state["Soulagement"] = 0.4;
     engine.processEmotions(calm_state);
+    engine.processSpeechText("Bonjour, je suis content de te voir. Tout va bien aujourd'hui.", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Scénario 2: Montée de joie (transition JOIE)
-    std::cout << "\n═══ Scénario 2: Montée de joie ═══\n";
+    // Scénario 2: Montée de joie (transition JOIE) + texte enthousiaste
+    std::cout << "\n═══ Scénario 2: Montée de joie + parole enthousiaste ═══\n";
     std::unordered_map<std::string, double> joy_state;
     for (const auto& name : EMOTION_NAMES) {
         joy_state[name] = 0.1;
@@ -64,10 +65,11 @@ void runDemo(MCEEEngine& engine) {
     joy_state["Satisfaction"] = 0.6;
     joy_state["Triomphe"] = 0.5;
     engine.processEmotions(joy_state);
+    engine.processSpeechText("C'est fantastique ! J'ai réussi mon examen, je suis tellement heureux !", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Scénario 3: Exploration (curiosité)
-    std::cout << "\n═══ Scénario 3: Mode exploration ═══\n";
+    // Scénario 3: Exploration (curiosité) + texte interrogatif
+    std::cout << "\n═══ Scénario 3: Mode exploration + questions ═══\n";
     std::unordered_map<std::string, double> explore_state;
     for (const auto& name : EMOTION_NAMES) {
         explore_state[name] = 0.1;
@@ -77,10 +79,11 @@ void runDemo(MCEEEngine& engine) {
     explore_state["Excitation"] = 0.5;
     explore_state["Émerveillement"] = 0.6;
     engine.processEmotions(explore_state);
+    engine.processSpeechText("Comment ça fonctionne ? C'est vraiment incroyable ce système !", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Scénario 4: Anxiété croissante
-    std::cout << "\n═══ Scénario 4: Anxiété croissante ═══\n";
+    // Scénario 4: Anxiété croissante + texte stressant
+    std::cout << "\n═══ Scénario 4: Anxiété + parole inquiète ═══\n";
     std::unordered_map<std::string, double> anxiety_state;
     for (const auto& name : EMOTION_NAMES) {
         anxiety_state[name] = 0.1;
@@ -89,10 +92,11 @@ void runDemo(MCEEEngine& engine) {
     anxiety_state["Confusion"] = 0.5;
     anxiety_state["Peur"] = 0.3;
     engine.processEmotions(anxiety_state);
+    engine.processSpeechText("Je suis inquiet, j'ai un mauvais pressentiment. Quelque chose ne va pas.", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Scénario 5: URGENCE - Peur intense
-    std::cout << "\n═══ Scénario 5: ⚠ URGENCE - Peur intense ═══\n";
+    // Scénario 5: URGENCE - Peur intense + texte de danger
+    std::cout << "\n═══ Scénario 5: ⚠ URGENCE - Peur + alerte danger ═══\n";
     std::unordered_map<std::string, double> fear_state;
     for (const auto& name : EMOTION_NAMES) {
         fear_state[name] = 0.05;
@@ -101,10 +105,11 @@ void runDemo(MCEEEngine& engine) {
     fear_state["Horreur"] = 0.7;
     fear_state["Anxiété"] = 0.8;
     engine.processEmotions(fear_state);
+    engine.processSpeechText("Attention danger ! Il faut fuir immédiatement, c'est une urgence !", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Scénario 6: Retour au calme
-    std::cout << "\n═══ Scénario 6: Retour progressif au calme ═══\n";
+    // Scénario 6: Retour au calme + texte rassurant
+    std::cout << "\n═══ Scénario 6: Retour au calme + parole apaisante ═══\n";
     std::unordered_map<std::string, double> recovery_state;
     for (const auto& name : EMOTION_NAMES) {
         recovery_state[name] = 0.1;
@@ -113,6 +118,7 @@ void runDemo(MCEEEngine& engine) {
     recovery_state["Calme"] = 0.5;
     recovery_state["Peur"] = 0.2;
     engine.processEmotions(recovery_state);
+    engine.processSpeechText("C'est fini, tout va bien maintenant. On peut se détendre.", "user");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     // Statistiques finales
@@ -124,6 +130,9 @@ void runDemo(MCEEEngine& engine) {
     std::cout << "  Urgences déclenchées : " << stats.emergency_triggers << "\n";
     std::cout << "  Souvenirs créés      : " << engine.getMemoryManager().getMemoryCount() << "\n";
     std::cout << "  Traumas              : " << engine.getMemoryManager().getTraumaCount() << "\n";
+    std::cout << "  Textes traités       : " << engine.getSpeechInput().getProcessedCount() << "\n";
+    std::cout << "  Sentiment moyen      : " << std::fixed << std::setprecision(2) 
+              << engine.getSpeechInput().getAverageSentiment() << "\n";
     std::cout << "  Sagesse accumulée    : " << std::fixed << std::setprecision(3) 
               << stats.wisdom << "\n\n";
 }

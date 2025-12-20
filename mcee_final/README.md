@@ -6,6 +6,7 @@
 
 Le MCEE est un système émotionnel complet qui intègre :
 - **24 émotions instantanées** (reçues du module C++ emotion)
+- **Entrées textuelles** (reçues du module de parole)
 - **Système de phases émotionnelles** (8 phases qui modulent le comportement)
 - **Gestion de la mémoire** (souvenirs, concepts, traumas - préparé pour Neo4j)
 - **Mécanismes de fusion et modulation** (adaptatifs selon la phase)
@@ -14,27 +15,53 @@ Le MCEE est un système émotionnel complet qui intègre :
 ## Architecture
 
 ```
-┌─────────────────────┐
-│  Module C++ Emotion │ ─► Prédit 24 émotions
-└─────────┬───────────┘
-          │ RabbitMQ (mcee.emotional.input)
+┌─────────────────────┐     ┌─────────────────────┐
+│  Module C++ Emotion │     │  Module Parole      │
+│  (24 émotions)      │     │  (texte transcrit)  │
+└─────────┬───────────┘     └─────────┬───────────┘
+          │                           │
+          │ RabbitMQ                  │ RabbitMQ
+          │ mcee.emotional.input      │ mcee.speech.input
+          │                           │
+          ▼                           ▼
+┌─────────────────────────────────────────────────┐
+│                  MCEE Engine                     │
+├─────────────────────────────────────────────────┤
+│  ┌─────────────┐    ┌─────────────────────┐     │
+│  │   Phase     │    │   Speech Input      │     │
+│  │   Detector  │    │   (analyse texte)   │     │
+│  └──────┬──────┘    └──────────┬──────────┘     │
+│         │                      │                 │
+│         ▼                      ▼                 │
+│  ┌─────────────────────────────────────────┐    │
+│  │         Emotion Updater                  │    │
+│  │   E_i(t+1) = E_i(t) + α·Fb_ext + ...    │    │
+│  └──────────────────┬──────────────────────┘    │
+│                     │                            │
+│         ┌───────────┴───────────┐               │
+│         ▼                       ▼               │
+│  ┌─────────────┐         ┌─────────────┐        │
+│  │  Memory     │         │  Amyghaleon │        │
+│  │  Manager    │         │  (urgences) │        │
+│  └─────────────┘         └─────────────┘        │
+└─────────────────────────────────────────────────┘
+          │
+          │ RabbitMQ
+          │ mcee.emotional.output
           ▼
-┌─────────────────────┐
-│   Phase Detector    │ ─► Détecte phase + PhaseConfig
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│    MCEE Engine      │ ─► Mise à jour E_i(t+1) + fusion E_global
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│   Memory Manager    │ ─► Souvenirs, concepts, traumas
-└─────────┬───────────┘
-          ▼
-┌─────────────────────┐
-│     Amyghaleon      │ ─► Réactions d'urgence
-└─────────────────────┘
+    [État émotionnel complet]
 ```
+
+## Flux de données
+
+1. **Module Emotion C++** → Envoie 24 émotions via RabbitMQ
+2. **Module Parole** → Envoie le texte transcrit via RabbitMQ
+3. **Phase Detector** → Détecte la phase émotionnelle actuelle
+4. **Speech Input** → Analyse le texte (sentiment, arousal, urgence)
+5. **Emotion Updater** → Met à jour les émotions avec tous les feedbacks
+6. **Memory Manager** → Gère les souvenirs et leur influence
+7. **Amyghaleon** → Vérifie les conditions d'urgence
+8. **Sortie** → Publie l'état émotionnel complet
 
 ## Les 8 Phases Émotionnelles
 
@@ -124,30 +151,52 @@ mcee/
 ├── config/
 │   └── phase_config.json
 ├── include/
-│   ├── Types.hpp
-│   ├── PhaseConfig.hpp
-│   ├── PhaseDetector.hpp
-│   ├── EmotionUpdater.hpp
-│   ├── Amyghaleon.hpp
-│   ├── MemoryManager.hpp
-│   └── MCEEEngine.hpp
+│   ├── Types.hpp           # Types et structures de données
+│   ├── PhaseConfig.hpp     # Configurations des 8 phases
+│   ├── PhaseDetector.hpp   # Détecteur de phases émotionnelles
+│   ├── EmotionUpdater.hpp  # Mise à jour des émotions (formule MCEE)
+│   ├── Amyghaleon.hpp      # Système d'urgence
+│   ├── MemoryManager.hpp   # Gestionnaire de mémoire
+│   ├── SpeechInput.hpp     # Analyse des textes de parole
+│   └── MCEEEngine.hpp      # Moteur principal
 └── src/
     ├── main.cpp
     ├── PhaseDetector.cpp
     ├── EmotionUpdater.cpp
     ├── Amyghaleon.cpp
     ├── MemoryManager.cpp
+    ├── SpeechInput.cpp
     └── MCEEEngine.cpp
 ```
 
 ## Communication RabbitMQ
 
-### Entrée (depuis module emotion)
+### Entrée Émotions (depuis module emotion C++)
 - Exchange: `mcee.emotional.input`
 - Routing Key: `emotions.predictions`
-- Format: JSON avec 24 émotions (0.0 - 1.0)
+- Format JSON:
+```json
+{
+  "Admiration": 0.123,
+  "Joie": 0.856,
+  "Peur": 0.045,
+  ...
+}
+```
 
-### Sortie
+### Entrée Parole (depuis module speech)
+- Exchange: `mcee.speech.input`
+- Routing Key: `speech.text`
+- Format JSON:
+```json
+{
+  "text": "Bonjour, je suis content de te voir",
+  "source": "user",
+  "confidence": 0.95
+}
+```
+
+### Sortie État MCEE
 - Exchange: `mcee.emotional.output`
 - Routing Key: `mcee.state`
 - Format: JSON avec état complet (émotions, phase, coefficients, stats)
@@ -159,6 +208,7 @@ mcee/
   "emotions": {
     "Admiration": 0.123,
     "Joie": 0.856,
+    "Peur": 0.045,
     ...
   },
   "E_global": 0.542,
@@ -176,12 +226,32 @@ mcee/
     "delta": 0.35,
     "theta": 0.05
   },
+  "speech": {
+    "last_sentiment": 0.65,
+    "last_arousal": 0.45,
+    "texts_processed": 12
+  },
   "stats": {
     "phase_transitions": 3,
     "emergency_triggers": 0,
     "wisdom": 0.045
   }
 }
+```
+
+## Module SpeechInput
+
+Le module `SpeechInput` analyse les textes reçus pour :
+
+1. **Analyse de sentiment** : Score de -1 (négatif) à +1 (positif)
+2. **Analyse d'arousal** : Niveau d'activation de 0 (calme) à 1 (excité)
+3. **Détection de menaces** : Mots-clés de danger (peur, mort, urgence...)
+4. **Extraction de mots-clés** : Mots significatifs pour le contexte
+5. **Score d'urgence** : Combinaison menace + arousal + sentiment négatif
+
+Le feedback externe (`Fb_ext`) est calculé à partir de cette analyse :
+```
+Fb_ext = sentiment × (1 + arousal × 0.5) + bonus_menace + bonus_positif
 ```
 
 ## Roadmap
