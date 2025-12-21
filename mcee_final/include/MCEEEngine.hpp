@@ -161,9 +161,10 @@ public:
     /**
      * @brief Charge la configuration depuis un fichier JSON
      * @param config_path Chemin vers le fichier de configuration
+     * @param skip_neo4j Si true, ignore la configuration Neo4j (mode démo)
      * @return true si chargement réussi
      */
-    bool loadConfig(const std::string& config_path);
+    bool loadConfig(const std::string& config_path, bool skip_neo4j = false);
 
     /**
      * @brief Charge les patterns depuis un fichier
