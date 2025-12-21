@@ -83,7 +83,7 @@ class Neo4jService:
     def __init__(self,
                  neo4j_uri: str = "bolt://localhost:7687",
                  neo4j_user: str = "neo4j",
-                 neo4j_password: str = "password",
+                 neo4j_password: str = "virtus@84",
                  rabbitmq_host: str = "localhost",
                  request_queue: str = "neo4j.requests.queue",
                  response_exchange: str = "neo4j.responses"):
