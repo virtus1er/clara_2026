@@ -120,12 +120,15 @@ void MCEEEngine::setupCallbacks() {
     // Callback sur transition
     pattern_matcher_->setTransitionCallback([this](const std::string& from, const std::string& to, double prob) {
         stats_.phase_transitions++;
-        
+
         // Enregistrer la durée du pattern précédent
         auto now = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double>(now - pattern_start_time_).count();
         mlt_->recordActivation(from, duration);
-        
+
+        // Enregistrer la transition dans Neo4j
+        memory_manager_.recordPatternTransition(from, to, duration, "auto");
+
         pattern_start_time_ = now;
     });
     
@@ -689,6 +692,38 @@ bool MCEEEngine::loadConfig(const std::string& config_path) {
     if (success) {
         emotion_updater_.setCoefficientsFromPhase(phase_detector_.getCurrentConfig());
     }
+
+    // Charger la configuration Neo4j si présente
+    try {
+        std::ifstream file(config_path);
+        if (file.is_open()) {
+            json config = json::parse(file);
+
+            if (config.contains("neo4j") && config["neo4j"].value("enabled", false)) {
+                Neo4jClientConfig neo4j_config;
+                auto& neo4j_json = config["neo4j"];
+
+                neo4j_config.rabbitmq_host = neo4j_json.value("rabbitmq_host", "localhost");
+                neo4j_config.rabbitmq_port = neo4j_json.value("rabbitmq_port", 5672);
+                neo4j_config.rabbitmq_user = neo4j_json.value("rabbitmq_user", "virtus");
+                neo4j_config.rabbitmq_password = neo4j_json.value("rabbitmq_password", "virtus@83");
+                neo4j_config.request_queue = neo4j_json.value("request_queue", "neo4j.requests.queue");
+                neo4j_config.response_exchange = neo4j_json.value("response_exchange", "neo4j.responses");
+                neo4j_config.request_timeout_ms = neo4j_json.value("request_timeout_ms", 5000);
+                neo4j_config.max_retries = neo4j_json.value("max_retries", 3);
+                neo4j_config.async_mode = neo4j_json.value("async_mode", true);
+
+                if (memory_manager_.setNeo4jConfig(neo4j_config)) {
+                    std::cout << "[MCEEEngine] Neo4j activé et connecté\n";
+                } else {
+                    std::cerr << "[MCEEEngine] Neo4j configuré mais non connecté\n";
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[MCEEEngine] Erreur chargement config Neo4j: " << e.what() << "\n";
+    }
+
     return success;
 }
 

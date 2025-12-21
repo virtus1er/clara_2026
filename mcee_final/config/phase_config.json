@@ -1,4 +1,16 @@
 {
+  "neo4j": {
+    "enabled": true,
+    "rabbitmq_host": "localhost",
+    "rabbitmq_port": 5672,
+    "rabbitmq_user": "virtus",
+    "rabbitmq_password": "virtus@83",
+    "request_queue": "neo4j.requests.queue",
+    "response_exchange": "neo4j.responses",
+    "request_timeout_ms": 5000,
+    "max_retries": 3,
+    "async_mode": true
+  },
   "phases": {
     "SERENITE": {
       "alpha": 0.25,

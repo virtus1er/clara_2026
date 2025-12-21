@@ -42,7 +42,7 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Source files - Version 3.0 avec MCT/MLT
+# Source files - Version 3.0 avec MCT/MLT + Neo4j
 set(MCEE_SOURCES
     src/main.cpp
     src/MCEEEngine.cpp
@@ -54,6 +54,7 @@ set(MCEE_SOURCES
     src/Amyghaleon.cpp
     src/MemoryManager.cpp
     src/SpeechInput.cpp
+    src/Neo4jClient.cpp
 )
 
 set(MCEE_HEADERS
@@ -68,6 +69,7 @@ set(MCEE_HEADERS
     include/PhaseConfig.hpp
     include/SpeechInput.hpp
     include/PatternMatcher.hpp
+    include/Neo4jClient.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})
