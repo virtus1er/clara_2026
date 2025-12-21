@@ -5,11 +5,32 @@ services:
     ports:
       - "9980:80"
     restart: always
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      - neo4j
     volumes:
-      - /home/virtus/clara_2026/neo4_final/:/app
+      - .:/app
+
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:
 
 networks:
   default:
-    external:
-      name: virtus
+    name: virtus
+    external: true
 
