@@ -563,6 +563,85 @@ class Neo4jFullTest:
             return True
         return False
 
+    def test_get_concept_with_ids(self) -> bool:
+        """Test récupération de concept avec ses IDs de mémoires"""
+        # Créer une mémoire avec contexte (génère des concepts)
+        mem_id = f"TEST_CONCEPT_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.6] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le soleil brille sur la montagne'
+        })
+
+        # Récupérer un concept
+        response = self.client.send_request('get_concept', {
+            'name': 'soleil'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data')
+            if data:
+                print(f"  → Concept: {data.get('name')}")
+                print(f"  → Memory IDs: {data.get('memory_ids')}")
+                print(f"  → Linked memories: {data.get('linked_memories')}")
+                return len(data.get('memory_ids', [])) > 0
+        return False
+
+    def test_get_concepts_by_memory(self) -> bool:
+        """Test récupération des concepts d'une mémoire"""
+        mem_id = f"TEST_CONCEPTS_MEM_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.7] + [0.0] * 23,
+            'dominant': 'Joie',
+            'context': 'Les enfants jouent dans le jardin fleuri'
+        })
+
+        response = self.client.send_request('get_concepts_by_memory', {
+            'memory_id': mem_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Concepts trouvés: {len(data)}")
+            for c in data[:5]:
+                print(f"    - {c.get('name')}: IDs={c.get('memory_ids')}")
+            return len(data) > 0
+        return False
+
+    def test_get_relations_with_ids(self) -> bool:
+        """Test récupération des relations avec leurs IDs de mémoires"""
+        # Créer une mémoire avec relations
+        mem_id = f"TEST_REL_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.5] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le chat noir dort sur le canapé rouge'
+        })
+
+        response = self.client.send_request('get_relations_with_ids', {
+            'memory_id': mem_id,
+            'limit': 10
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Relations trouvées: {len(data)}")
+            for r in data[:3]:
+                print(f"    - '{r.get('source')}' id:{r.get('source_ids')} "
+                      f"--[{r.get('relation')}]--> "
+                      f"'{r.get('target')}' id:{r.get('target_ids')}")
+            return True  # Peut être vide si pas de relations SEMANTIQUE
+        return False
+
     # ═══════════════════════════════════════════════════════════════════════
     # TESTS SESSION
     # ═══════════════════════════════════════════════════════════════════════
@@ -725,6 +804,9 @@ class Neo4jFullTest:
         self.run_test("Extraction de relations", self.test_extract_relations)
         self.run_test("Création de concept", self.test_create_concept)
         self.run_test("Liaison mémoire-concept", self.test_link_memory_concept)
+        self.run_test("Concept avec IDs de mémoires", self.test_get_concept_with_ids)
+        self.run_test("Concepts par mémoire", self.test_get_concepts_by_memory)
+        self.run_test("Relations avec IDs", self.test_get_relations_with_ids)
 
         # Sessions
         self.run_test("Création de session", self.test_create_session)

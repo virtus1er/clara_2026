@@ -33,10 +33,13 @@ class RequestType(Enum):
     GET_TRANSITIONS = "get_transitions"
     RECORD_TRANSITION = "record_transition"
 
-    # Relations
+    # Relations / Concepts
     EXTRACT_RELATIONS = "extract_relations"
     CREATE_CONCEPT = "create_concept"
     LINK_MEMORY_CONCEPT = "link_memory_concept"
+    GET_CONCEPT = "get_concept"
+    GET_CONCEPTS_BY_MEMORY = "get_concepts_by_memory"
+    GET_RELATIONS_WITH_IDS = "get_relations_with_ids"
 
     # Session
     CREATE_SESSION = "create_session"
@@ -128,6 +131,9 @@ class Neo4jService:
             RequestType.EXTRACT_RELATIONS.value: self._handle_extract_relations,
             RequestType.CREATE_CONCEPT.value: self._handle_create_concept,
             RequestType.LINK_MEMORY_CONCEPT.value: self._handle_link_memory_concept,
+            RequestType.GET_CONCEPT.value: self._handle_get_concept,
+            RequestType.GET_CONCEPTS_BY_MEMORY.value: self._handle_get_concepts_by_memory,
+            RequestType.GET_RELATIONS_WITH_IDS.value: self._handle_get_relations_with_ids,
             RequestType.CREATE_SESSION.value: self._handle_create_session,
             RequestType.UPDATE_SESSION.value: self._handle_update_session,
             RequestType.GET_SESSION.value: self._handle_get_session,
@@ -299,25 +305,43 @@ class Neo4jService:
 
             created_id = result.single()['id']
 
-            # Créer les concepts et relations
+            # Créer les concepts et relations avec tracking des IDs de mémoires
             for word in keywords:
                 session.run("""
                     MERGE (c:Concept {name: $name})
-                    ON CREATE SET c.created_at = datetime()
+                    ON CREATE SET c.created_at = datetime(), c.memory_ids = [$mem_id]
+                    ON MATCH SET c.memory_ids = CASE
+                        WHEN $mem_id IN c.memory_ids THEN c.memory_ids
+                        ELSE c.memory_ids + $mem_id
+                    END
                     WITH c
                     MATCH (m:Memory {id: $mem_id})
                     MERGE (m)-[:EVOQUE]->(c)
                 """, name=word.lower(), mem_id=created_id)
 
-            # Créer les relations sémantiques
+            # Créer les relations sémantiques avec tracking des IDs sources
             for w1, rel_type, w2 in relations:
                 session.run("""
                     MERGE (c1:Concept {name: $w1})
+                    ON CREATE SET c1.created_at = datetime(), c1.memory_ids = [$mem_id]
+                    ON MATCH SET c1.memory_ids = CASE
+                        WHEN $mem_id IN c1.memory_ids THEN c1.memory_ids
+                        ELSE c1.memory_ids + $mem_id
+                    END
                     MERGE (c2:Concept {name: $w2})
+                    ON CREATE SET c2.created_at = datetime(), c2.memory_ids = [$mem_id]
+                    ON MATCH SET c2.memory_ids = CASE
+                        WHEN $mem_id IN c2.memory_ids THEN c2.memory_ids
+                        ELSE c2.memory_ids + $mem_id
+                    END
                     MERGE (c1)-[r:SEMANTIQUE {type: $rel_type}]->(c2)
-                    ON CREATE SET r.count = 1
-                    ON MATCH SET r.count = r.count + 1
-                """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type)
+                    ON CREATE SET r.count = 1, r.memory_ids = [$mem_id]
+                    ON MATCH SET r.count = r.count + 1,
+                        r.memory_ids = CASE
+                            WHEN $mem_id IN r.memory_ids THEN r.memory_ids
+                            ELSE r.memory_ids + $mem_id
+                        END
+                """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, mem_id=created_id)
 
             # Lier au pattern
             session.run("""
@@ -408,11 +432,15 @@ class Neo4jService:
 
             created_id = result.single()['id']
 
-            # Créer les concepts déclencheurs
+            # Créer les concepts déclencheurs avec tracking des IDs
             for keyword in trigger_keywords:
                 session.run("""
                     MERGE (c:Concept {name: $name})
-                    ON CREATE SET c.created_at = datetime()
+                    ON CREATE SET c.created_at = datetime(), c.memory_ids = [$trauma_id]
+                    ON MATCH SET c.memory_ids = CASE
+                        WHEN $trauma_id IN c.memory_ids THEN c.memory_ids
+                        ELSE c.memory_ids + $trauma_id
+                    END
                     WITH c
                     MATCH (t:Trauma {id: $trauma_id})
                     MERGE (t)-[:TRIGGERED_BY {strength: 0.9}]->(c)
@@ -749,6 +777,85 @@ class Neo4jService:
                 'concept': record['concept'],
                 'relation': relation_type
             }
+
+    def _handle_get_concept(self, payload: Dict) -> Optional[Dict]:
+        """Récupère un concept avec ses IDs de mémoires"""
+        concept_name = payload['name'].lower()
+
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (c:Concept {name: $name})
+                OPTIONAL MATCH (c)<-[:EVOQUE]-(m:Memory)
+                RETURN c, collect(m.id) AS linked_memories
+            """, name=concept_name)
+
+            record = result.single()
+            if record and record['c']:
+                c = record['c']
+                return {
+                    'name': c['name'],
+                    'memory_ids': c.get('memory_ids', []),
+                    'linked_memories': [m for m in record['linked_memories'] if m],
+                    'trauma_associated': c.get('trauma_associated', False),
+                    'created_at': str(c.get('created_at', ''))
+                }
+        return None
+
+    def _handle_get_concepts_by_memory(self, payload: Dict) -> List[Dict]:
+        """Récupère tous les concepts associés à une mémoire"""
+        memory_id = payload['memory_id']
+
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (m:Memory {id: $mem_id})-[:EVOQUE]->(c:Concept)
+                RETURN c.name AS name, c.memory_ids AS memory_ids,
+                       c.trauma_associated AS trauma_associated
+            """, mem_id=memory_id)
+
+            return [dict(r) for r in result]
+
+    def _handle_get_relations_with_ids(self, payload: Dict) -> List[Dict]:
+        """Récupère les relations sémantiques avec leurs IDs de mémoires"""
+        memory_id = payload.get('memory_id')
+        concept_name = payload.get('concept_name')
+        limit = payload.get('limit', 50)
+
+        with self.driver.session() as session:
+            if memory_id:
+                # Relations pour une mémoire spécifique
+                result = session.run("""
+                    MATCH (c1:Concept)-[r:SEMANTIQUE]->(c2:Concept)
+                    WHERE $mem_id IN r.memory_ids
+                    RETURN c1.name AS source, c1.memory_ids AS source_ids,
+                           r.type AS relation, r.memory_ids AS relation_ids,
+                           c2.name AS target, c2.memory_ids AS target_ids
+                    LIMIT $limit
+                """, mem_id=memory_id, limit=limit)
+            elif concept_name:
+                # Relations pour un concept
+                result = session.run("""
+                    MATCH (c1:Concept {name: $name})-[r:SEMANTIQUE]->(c2:Concept)
+                    RETURN c1.name AS source, c1.memory_ids AS source_ids,
+                           r.type AS relation, r.memory_ids AS relation_ids,
+                           c2.name AS target, c2.memory_ids AS target_ids
+                    UNION
+                    MATCH (c1:Concept)-[r:SEMANTIQUE]->(c2:Concept {name: $name})
+                    RETURN c1.name AS source, c1.memory_ids AS source_ids,
+                           r.type AS relation, r.memory_ids AS relation_ids,
+                           c2.name AS target, c2.memory_ids AS target_ids
+                    LIMIT $limit
+                """, name=concept_name.lower(), limit=limit)
+            else:
+                # Toutes les relations
+                result = session.run("""
+                    MATCH (c1:Concept)-[r:SEMANTIQUE]->(c2:Concept)
+                    RETURN c1.name AS source, c1.memory_ids AS source_ids,
+                           r.type AS relation, r.memory_ids AS relation_ids,
+                           c2.name AS target, c2.memory_ids AS target_ids
+                    LIMIT $limit
+                """, limit=limit)
+
+            return [dict(r) for r in result]
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HANDLERS SESSION
