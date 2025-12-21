@@ -8,10 +8,13 @@ services:
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=virtus@84
+      - NEO4J_PASSWORD=password
       - RABBITMQ_HOST=rabbitmq
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - .:/app
 
@@ -25,6 +28,26 @@ services:
       - NEO4J_AUTH=neo4j/virtus@84
     volumes:
       - neo4j_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=virtus
+      - RABBITMQ_DEFAULT_PASS=virtus@83
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   neo4j_data:
