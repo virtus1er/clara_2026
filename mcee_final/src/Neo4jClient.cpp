@@ -38,7 +38,15 @@ bool Neo4jClient::connect() {
             config_.rabbitmq_password
         };
 
+        // Timeout de connexion court pour ne pas bloquer en mode démo
+        opts.frame_max = 131072;
+
         channel_ = AmqpClient::Channel::Open(opts);
+
+        if (!channel_) {
+            std::cerr << "[Neo4jClient] Échec création du canal RabbitMQ\n";
+            return false;
+        }
 
         // Déclarer la queue de requêtes
         channel_->DeclareQueue(config_.request_queue, false, true, false, false);

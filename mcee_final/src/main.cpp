@@ -183,9 +183,12 @@ int main(int argc, char* argv[]) {
         // Créer le moteur MCEE
         MCEEEngine engine(config);
 
-        // Charger la configuration
+        // Charger la configuration (sans Neo4j en mode démo)
         if (std::ifstream(config_file).good()) {
-            engine.loadConfig(config_file);
+            engine.loadConfig(config_file, demo_mode);  // skip_neo4j = true en mode démo
+            if (demo_mode) {
+                std::cout << "[Main] Mode démo: Neo4j désactivé\n";
+            }
         } else {
             std::cout << "[Main] Fichier config non trouvé, utilisation des valeurs par défaut\n";
         }
