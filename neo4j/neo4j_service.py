@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class RequestType(Enum):
     """Types de requêtes supportées"""
-    # Mémoire
+    # Mémoire de base
     CREATE_MEMORY = "create_memory"
     MERGE_MEMORY = "merge_memory"
     CREATE_TRAUMA = "create_trauma"
@@ -26,6 +26,13 @@ class RequestType(Enum):
     APPLY_DECAY = "apply_decay"
     REACTIVATE = "reactivate"
     DELETE_MEMORY = "delete_memory"
+
+    # Architecture mémoire avancée
+    CONSOLIDATE_TO_MLT = "consolidate_to_mlt"  # MCT → MLT
+    ACTIVATE_WORKING = "activate_working"      # Activer en MT
+    CREATE_PROCEDURAL = "create_procedural"    # Mémoire procédurale
+    GET_AUTOBIOGRAPHIC = "get_autobiographic"  # Mémoire autobiographique
+    LINK_ASSOCIATIVE = "link_associative"      # Lien associatif (odeurs, etc.)
 
     # Patterns
     GET_PATTERN = "get_pattern"
@@ -40,6 +47,7 @@ class RequestType(Enum):
     GET_CONCEPT = "get_concept"
     GET_CONCEPTS_BY_MEMORY = "get_concepts_by_memory"
     GET_RELATIONS_WITH_IDS = "get_relations_with_ids"
+    CREATE_SEMANTIC_RELATION = "create_semantic_relation"  # is-a, part-of
 
     # Session
     CREATE_SESSION = "create_session"
@@ -49,6 +57,18 @@ class RequestType(Enum):
     # Requêtes génériques
     CYPHER_QUERY = "cypher_query"
     BATCH_QUERY = "batch_query"
+
+
+class MemoryType(Enum):
+    """Types de mémoire"""
+    MCT = "MCT"              # Mémoire à Court Terme (éphémère)
+    MLT = "MLT"              # Mémoire à Long Terme (consolidée)
+    WORKING = "Working"       # Mémoire de Travail (activée)
+    EPISODIC = "Episodic"     # Épisodique (chapitres de vie)
+    SEMANTIC = "Semantic"     # Sémantique (encyclopédie)
+    PROCEDURAL = "Procedural" # Procédurale (routines)
+    ASSOCIATIVE = "Associative" # Associative (odeurs, sensations)
+    AUTOBIOGRAPHIC = "Autobiographic" # Autobiographique (identité IA)
 
 
 @dataclass
@@ -116,6 +136,7 @@ class Neo4jService:
 
         # Handlers
         self.handlers = {
+            # Mémoire de base
             RequestType.CREATE_MEMORY.value: self._handle_create_memory,
             RequestType.MERGE_MEMORY.value: self._handle_merge_memory,
             RequestType.CREATE_TRAUMA.value: self._handle_create_trauma,
@@ -124,19 +145,30 @@ class Neo4jService:
             RequestType.APPLY_DECAY.value: self._handle_apply_decay,
             RequestType.REACTIVATE.value: self._handle_reactivate,
             RequestType.DELETE_MEMORY.value: self._handle_delete_memory,
+            # Architecture mémoire avancée
+            RequestType.CONSOLIDATE_TO_MLT.value: self._handle_consolidate_to_mlt,
+            RequestType.ACTIVATE_WORKING.value: self._handle_activate_working,
+            RequestType.CREATE_PROCEDURAL.value: self._handle_create_procedural,
+            RequestType.GET_AUTOBIOGRAPHIC.value: self._handle_get_autobiographic,
+            RequestType.LINK_ASSOCIATIVE.value: self._handle_link_associative,
+            # Patterns
             RequestType.GET_PATTERN.value: self._handle_get_pattern,
             RequestType.UPDATE_PATTERN.value: self._handle_update_pattern,
             RequestType.GET_TRANSITIONS.value: self._handle_get_transitions,
             RequestType.RECORD_TRANSITION.value: self._handle_record_transition,
+            # Relations / Concepts
             RequestType.EXTRACT_RELATIONS.value: self._handle_extract_relations,
             RequestType.CREATE_CONCEPT.value: self._handle_create_concept,
             RequestType.LINK_MEMORY_CONCEPT.value: self._handle_link_memory_concept,
             RequestType.GET_CONCEPT.value: self._handle_get_concept,
             RequestType.GET_CONCEPTS_BY_MEMORY.value: self._handle_get_concepts_by_memory,
             RequestType.GET_RELATIONS_WITH_IDS.value: self._handle_get_relations_with_ids,
+            RequestType.CREATE_SEMANTIC_RELATION.value: self._handle_create_semantic_relation,
+            # Sessions
             RequestType.CREATE_SESSION.value: self._handle_create_session,
             RequestType.UPDATE_SESSION.value: self._handle_update_session,
             RequestType.GET_SESSION.value: self._handle_get_session,
+            # Requêtes génériques
             RequestType.CYPHER_QUERY.value: self._handle_cypher_query,
             RequestType.BATCH_QUERY.value: self._handle_batch_query,
         }
@@ -604,6 +636,203 @@ class Neo4jService:
                 session.run("MATCH (m:Memory {id: $id}) DETACH DELETE m", id=memory_id)
 
         return {'deleted': memory_id, 'archived': archive}
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HANDLERS ARCHITECTURE MÉMOIRE AVANCÉE
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _handle_consolidate_to_mlt(self, payload: Dict) -> Dict:
+        """Consolide une mémoire MCT vers MLT (mémoire à long terme)"""
+        memory_id = payload['id']
+        importance = payload.get('importance', 0.7)  # Seuil d'importance
+
+        with self.driver.session() as session:
+            # Vérifier si la mémoire est éligible à la consolidation
+            result = session.run("""
+                MATCH (m:Memory {id: $id})
+                WHERE m.type = 'MCT' OR NOT EXISTS(m.consolidated)
+                WITH m,
+                     CASE
+                         WHEN m.trauma = true THEN 1.0
+                         WHEN m.intensity >= $importance THEN m.intensity
+                         WHEN m.activation_count >= 3 THEN 0.8
+                         ELSE m.weight * m.intensity
+                     END AS consolidation_score
+                WHERE consolidation_score >= $importance
+                SET m.type = 'MLT',
+                    m.consolidated = true,
+                    m.consolidated_at = datetime(),
+                    m.consolidation_score = consolidation_score
+                RETURN m.id AS id, m.type AS type, consolidation_score
+            """, id=memory_id, importance=importance)
+
+            record = result.single()
+            if record:
+                return {
+                    'consolidated': True,
+                    'id': record['id'],
+                    'type': record['type'],
+                    'score': record['consolidation_score']
+                }
+
+        return {'consolidated': False, 'reason': 'Memory not eligible or not found'}
+
+    def _handle_activate_working(self, payload: Dict) -> Dict:
+        """Active une mémoire dans la mémoire de travail (MT)"""
+        memory_id = payload['id']
+        task_context = payload.get('task_context', '')
+
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (m:Memory {id: $id})
+                SET m.working_active = true,
+                    m.working_activated_at = datetime(),
+                    m.working_task_context = $task_context,
+                    m.working_access_count = COALESCE(m.working_access_count, 0) + 1,
+                    m.activation_count = COALESCE(m.activation_count, 0) + 1,
+                    m.last_activated = datetime()
+                RETURN m.id AS id, m.working_access_count AS access_count
+            """, id=memory_id, task_context=task_context)
+
+            record = result.single()
+            if record:
+                return {
+                    'activated': True,
+                    'id': record['id'],
+                    'access_count': record['access_count']
+                }
+
+        return {'activated': False, 'error': 'Memory not found'}
+
+    def _handle_create_procedural(self, payload: Dict) -> Dict:
+        """Crée une mémoire procédurale (routine)"""
+        proc_id = payload.get('id', f"PROC_{datetime.now().timestamp()}")
+        name = payload['name']
+        steps = payload.get('steps', [])
+        trigger = payload.get('trigger', '')
+        frequency = payload.get('frequency', 0)  # Nombre de fois exécutée
+
+        with self.driver.session() as session:
+            result = session.run("""
+                CREATE (p:Memory:Procedural {
+                    id: $id,
+                    type: 'Procedural',
+                    name: $name,
+                    steps: $steps,
+                    trigger: $trigger,
+                    frequency: $frequency,
+                    automaticity: CASE WHEN $frequency > 10 THEN 0.9
+                                       WHEN $frequency > 5 THEN 0.7
+                                       ELSE 0.3 END,
+                    created_at: datetime(),
+                    last_executed: datetime()
+                })
+                RETURN p.id AS id, p.name AS name, p.automaticity AS automaticity
+            """, id=proc_id, name=name, steps=steps, trigger=trigger, frequency=frequency)
+
+            record = result.single()
+            return {
+                'id': record['id'],
+                'name': record['name'],
+                'automaticity': record['automaticity']
+            }
+
+    def _handle_get_autobiographic(self, payload: Dict) -> Dict:
+        """Récupère ou crée le nœud de mémoire autobiographique (identité IA)"""
+        ia_id = payload.get('ia_id', 'CLARA')
+
+        with self.driver.session() as session:
+            # Créer ou récupérer le nœud autobiographique
+            result = session.run("""
+                MERGE (a:Memory:Autobiographic {ia_id: $ia_id})
+                ON CREATE SET
+                    a.id = 'AUTOBIO_' + $ia_id,
+                    a.type = 'Autobiographic',
+                    a.created_at = datetime(),
+                    a.personality_traits = [],
+                    a.core_values = [],
+                    a.significant_events = [],
+                    a.relationships = []
+                WITH a
+                OPTIONAL MATCH (a)-[:REMEMBERS]->(e:Memory:Episodic)
+                OPTIONAL MATCH (a)-[:KNOWS]->(s:Memory:Semantic)
+                RETURN a,
+                       count(DISTINCT e) AS episodic_count,
+                       count(DISTINCT s) AS semantic_count
+            """, ia_id=ia_id)
+
+            record = result.single()
+            if record:
+                auto = record['a']
+                return {
+                    'id': auto['id'],
+                    'ia_id': auto['ia_id'],
+                    'personality_traits': auto.get('personality_traits', []),
+                    'core_values': auto.get('core_values', []),
+                    'episodic_memories': record['episodic_count'],
+                    'semantic_knowledge': record['semantic_count']
+                }
+
+        return {'error': 'Could not create autobiographic memory'}
+
+    def _handle_link_associative(self, payload: Dict) -> Dict:
+        """Crée un lien associatif entre mémoires (odeurs, sensations, etc.)"""
+        source_id = payload['source_id']
+        target_id = payload['target_id']
+        association_type = payload.get('type', 'SENSORY')  # SENSORY, EMOTIONAL, CONTEXTUAL
+        trigger = payload.get('trigger', '')  # Ex: "odeur de café"
+        strength = payload.get('strength', 0.5)
+
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (s:Memory {id: $source_id})
+                MATCH (t:Memory {id: $target_id})
+                MERGE (s)-[r:ASSOCIE {type: $assoc_type}]->(t)
+                ON CREATE SET
+                    r.created_at = datetime(),
+                    r.trigger = $trigger,
+                    r.strength = $strength,
+                    r.activation_count = 1
+                ON MATCH SET
+                    r.strength = CASE WHEN r.strength + 0.1 > 1.0 THEN 1.0
+                                      ELSE r.strength + 0.1 END,
+                    r.activation_count = r.activation_count + 1
+                RETURN s.id AS source, t.id AS target,
+                       r.type AS type, r.strength AS strength
+            """, source_id=source_id, target_id=target_id,
+                 assoc_type=association_type, trigger=trigger, strength=strength)
+
+            record = result.single()
+            if record:
+                return dict(record)
+
+        return {'error': 'Could not create associative link'}
+
+    def _handle_create_semantic_relation(self, payload: Dict) -> Dict:
+        """Crée une relation sémantique (is-a, part-of, has-property, etc.)"""
+        subject = payload['subject'].lower()
+        relation = payload['relation']  # IS_A, PART_OF, HAS_PROPERTY, LOCATED_IN, etc.
+        object_name = payload['object'].lower()
+        properties = payload.get('properties', {})
+
+        with self.driver.session() as session:
+            result = session.run(f"""
+                MERGE (s:Concept {{name: $subject}})
+                ON CREATE SET s.created_at = datetime(), s.memory_ids = []
+                MERGE (o:Concept {{name: $object}})
+                ON CREATE SET o.created_at = datetime(), o.memory_ids = []
+                MERGE (s)-[r:{relation}]->(o)
+                ON CREATE SET r.created_at = datetime(), r.count = 1
+                ON MATCH SET r.count = r.count + 1
+                SET r += $props
+                RETURN s.name AS subject, type(r) AS relation, o.name AS object, r.count AS count
+            """, subject=subject, object=object_name, props=properties)
+
+            record = result.single()
+            if record:
+                return dict(record)
+
+        return {'error': 'Could not create semantic relation'}
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HANDLERS PATTERNS
