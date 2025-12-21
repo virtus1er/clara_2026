@@ -83,13 +83,16 @@ class Neo4jService:
     def __init__(self,
                  neo4j_uri: str = "bolt://localhost:7687",
                  neo4j_user: str = "neo4j",
-                 neo4j_password: str = "virtus@84",
+                 neo4j_password: str = "",
                  rabbitmq_host: str = "localhost",
                  request_queue: str = "neo4j.requests.queue",
                  response_exchange: str = "neo4j.responses"):
 
-        # Neo4j
-        self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+        # Neo4j - connect without auth if password is empty (NEO4J_AUTH=none)
+        if neo4j_password:
+            self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+        else:
+            self.driver = GraphDatabase.driver(neo4j_uri)
         self._verify_connection()
 
         # RabbitMQ
@@ -860,7 +863,7 @@ if __name__ == "__main__":
     service = Neo4jService(
         neo4j_uri=os.getenv('NEO4J_URI', 'bolt://neo4j:7687'),
         neo4j_user=os.getenv('NEO4J_USER', 'neo4j'),
-        neo4j_password=os.getenv('NEO4J_PASSWORD', 'password'),
+        neo4j_password=os.getenv('NEO4J_PASSWORD', ''),  # Empty = no auth (NEO4J_AUTH=none)
         rabbitmq_host=os.getenv('RABBITMQ_HOST', 'rabbitmq')
     )
 
