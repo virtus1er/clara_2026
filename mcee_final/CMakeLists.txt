@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(mcee VERSION 2.0 LANGUAGES CXX)
+project(mcee VERSION 3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,10 +42,13 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Source files
+# Source files - Version 3.0 avec MCT/MLT
 set(MCEE_SOURCES
     src/main.cpp
     src/MCEEEngine.cpp
+    src/MCT.cpp
+    src/MLT.cpp
+    src/PatternMatcher.cpp
     src/PhaseDetector.cpp
     src/EmotionUpdater.cpp
     src/Amyghaleon.cpp
@@ -56,12 +59,15 @@ set(MCEE_SOURCES
 set(MCEE_HEADERS
     include/Types.hpp
     include/MCEEEngine.hpp
+    include/MCT.hpp
+    include/MLT.hpp
     include/PhaseDetector.hpp
     include/EmotionUpdater.hpp
     include/Amyghaleon.hpp
     include/MemoryManager.hpp
     include/PhaseConfig.hpp
     include/SpeechInput.hpp
+    include/PatternMatcher.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})

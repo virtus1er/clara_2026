@@ -1,8 +1,10 @@
 /**
  * @file MCEEEngine.cpp
  * @brief Implémentation du moteur principal MCEE
- * @version 2.0
- * @date 2025-12-19
+ * @version 3.0
+ * @date 2024
+ * 
+ * Version 3.0 : Architecture MCT/MLT avec patterns dynamiques
  */
 
 #include "MCEEEngine.hpp"
@@ -17,16 +19,20 @@ MCEEEngine::MCEEEngine(const RabbitMQConfig& rabbitmq_config)
     : rabbitmq_config_(rabbitmq_config)
     , phase_detector_(DEFAULT_HYSTERESIS_MARGIN, DEFAULT_MIN_PHASE_DURATION)
     , last_update_time_(std::chrono::steady_clock::now())
+    , pattern_start_time_(std::chrono::steady_clock::now())
 {
     std::cout << "\n";
     std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
     std::cout << "║           MCEE - Modèle Complet d'Évaluation des États       ║\n";
-    std::cout << "║                        Version 2.0                            ║\n";
-    std::cout << "║         Avec intégration Module Émotions + Parole            ║\n";
+    std::cout << "║                        Version 3.0                            ║\n";
+    std::cout << "║              Architecture MCT/MLT - Patterns Dynamiques       ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════╝\n";
     std::cout << "\n";
 
-    // Configurer les callbacks
+    // Initialiser le système MCT/MLT
+    initMemorySystem();
+
+    // Configurer les callbacks legacy (PhaseDetector)
     phase_detector_.setTransitionCallback(
         [this](Phase from, Phase to, double duration) {
             stats_.previous_phase = from;
@@ -34,11 +40,11 @@ MCEEEngine::MCEEEngine(const RabbitMQConfig& rabbitmq_config)
             stats_.phase_duration = 0.0;
             stats_.phase_transitions++;
             
-            // Mettre à jour les coefficients
             emotion_updater_.setCoefficientsFromPhase(phase_detector_.getCurrentConfig());
         }
     );
 
+    // Configurer Amyghaleon
     amyghaleon_.setEmergencyCallback(
         [this](const EmergencyResponse& response) {
             executeEmergencyAction(response);
@@ -51,12 +57,97 @@ MCEEEngine::MCEEEngine(const RabbitMQConfig& rabbitmq_config)
         [this](const std::string& text, double urgency) {
             std::cout << "[MCEEEngine] ⚠ Urgence détectée dans le texte (score=" 
                       << std::fixed << std::setprecision(2) << urgency << ")\n";
-            // Augmenter le feedback interne en cas d'urgence textuelle
             current_feedback_.internal = std::max(current_feedback_.internal, urgency * 0.5);
         }
     );
 
-    std::cout << "[MCEEEngine] Moteur initialisé avec système de phases + parole\n";
+    // Configurer les callbacks MCT/MLT
+    setupCallbacks();
+
+    std::cout << "[MCEEEngine] Moteur v3.0 initialisé avec MCT/MLT + Parole\n";
+}
+
+void MCEEEngine::initMemorySystem() {
+    // Créer la MCT
+    MCTConfig mct_config;
+    mct_config.max_size = 60;
+    mct_config.time_window_seconds = 30.0;
+    mct_config.decay_factor = 0.95;
+    mct_config.min_samples_for_signature = 5;
+    mct_ = std::make_shared<MCT>(mct_config);
+    
+    // Créer la MLT avec les patterns de base
+    MLTConfig mlt_config;
+    mlt_config.min_similarity_threshold = 0.6;
+    mlt_config.high_similarity_threshold = 0.85;
+    mlt_config.learning_rate = 0.1;
+    mlt_config.max_patterns = 100;
+    mlt_ = std::make_shared<MLT>(mlt_config);
+    
+    // Créer le PatternMatcher
+    PatternMatcherConfig pm_config;
+    pm_config.high_match_threshold = 0.85;
+    pm_config.medium_match_threshold = 0.6;
+    pm_config.low_match_threshold = 0.4;
+    pm_config.hysteresis_margin = 0.1;
+    pm_config.min_frames_before_switch = 3;
+    pm_config.verbose_logging = true;
+    pattern_matcher_ = std::make_shared<PatternMatcher>(mct_, mlt_, pm_config);
+    
+    std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
+    std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
+}
+
+void MCEEEngine::setupCallbacks() {
+    if (!pattern_matcher_) return;
+    
+    // Callback sur changement de pattern
+    pattern_matcher_->setMatchCallback([this](const MatchResult& match) {
+        if (match.is_transition) {
+            std::cout << "\n[MCEEEngine] ═══ Transition de pattern: " 
+                      << current_match_.pattern_name << " → " 
+                      << match.pattern_name << " ═══\n";
+            std::cout << "[MCEEEngine] Similarité: " << std::fixed << std::setprecision(3) 
+                      << match.similarity << ", Confiance: " << match.confidence << "\n\n";
+        }
+    });
+    
+    // Callback sur création de pattern
+    pattern_matcher_->setNewPatternCallback([this](const std::string& id, const std::string& name) {
+        std::cout << "[MCEEEngine] ★ Nouveau pattern créé: " << name << " (id: " << id << ")\n";
+    });
+    
+    // Callback sur transition
+    pattern_matcher_->setTransitionCallback([this](const std::string& from, const std::string& to, double prob) {
+        stats_.phase_transitions++;
+        
+        // Enregistrer la durée du pattern précédent
+        auto now = std::chrono::steady_clock::now();
+        double duration = std::chrono::duration<double>(now - pattern_start_time_).count();
+        mlt_->recordActivation(from, duration);
+        
+        pattern_start_time_ = now;
+    });
+    
+    // Callback MLT sur événements pattern
+    if (mlt_) {
+        mlt_->setEventCallback([](const PatternEvent& event) {
+            std::string type_str;
+            switch (event.type) {
+                case PatternEvent::Type::CREATED: type_str = "CREATED"; break;
+                case PatternEvent::Type::MODIFIED: type_str = "MODIFIED"; break;
+                case PatternEvent::Type::MERGED: type_str = "MERGED"; break;
+                case PatternEvent::Type::DELETED: type_str = "DELETED"; break;
+                case PatternEvent::Type::ACTIVATED: type_str = "ACTIVATED"; break;
+                case PatternEvent::Type::DEACTIVATED: type_str = "DEACTIVATED"; break;
+            }
+            std::cout << "[MLT Event] " << type_str << ": " << event.pattern_name;
+            if (!event.details.empty()) {
+                std::cout << " - " << event.details;
+            }
+            std::cout << "\n";
+        });
+    }
 }
 
 MCEEEngine::~MCEEEngine() {
@@ -328,58 +419,67 @@ void MCEEEngine::processSpeechText(const std::string& text, const std::string& s
 }
 
 void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& raw_emotions) {
-    // 1. DÉTECTION DE PHASE
-    Phase previous_phase = phase_detector_.getCurrentPhase();
-    Phase current_phase = phase_detector_.detectPhase(current_state_);
-
-    if (current_phase != previous_phase) {
-        std::cout << "\n[MCEEEngine] ═══ Transition de phase: " 
-                  << phaseToString(previous_phase) << " → " 
-                  << phaseToString(current_phase) << " ═══\n\n";
+    // ═══════════════════════════════════════════════════════════════════════
+    // PIPELINE V3.0 : MCT → PatternMatcher → MLT
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    // 1. AJOUTER L'ÉTAT À LA MCT
+    pushToMCT(current_state_);
+    
+    // 2. IDENTIFIER LE PATTERN VIA PatternMatcher
+    MatchResult match = identifyPattern();
+    
+    // Stocker le match courant
+    MatchResult previous_match = current_match_;
+    current_match_ = match;
+    
+    // Log si transition
+    if (match.is_transition || match.pattern_id != previous_match.pattern_id) {
+        std::cout << "\n[MCEEEngine] Pattern actif: " << match.pattern_name 
+                  << " (sim=" << std::fixed << std::setprecision(3) << match.similarity 
+                  << ", conf=" << match.confidence << ")\n";
     }
-
-    // 2. RÉCUPÉRER LA CONFIGURATION DE PHASE
-    const auto& phase_config = phase_detector_.getCurrentConfig();
-
-    // 3. METTRE À JOUR LES COEFFICIENTS
-    emotion_updater_.setCoefficientsFromPhase(phase_config);
-
-    // 4. RÉCUPÉRER LES SOUVENIRS PERTINENTS
+    
+    // 3. APPLIQUER LES COEFFICIENTS DU PATTERN
+    EmotionalState processed_state = applyPatternCoefficients(current_state_, match);
+    
+    // 4. RÉCUPÉRER LES SOUVENIRS PERTINENTS (legacy)
+    Phase current_phase = phase_detector_.getCurrentPhase();
     auto memories = memory_manager_.queryRelevantMemories(current_phase, current_state_, 10);
-
-    // Mettre à jour les activations des souvenirs
+    
     for (auto& mem : memories) {
         memory_manager_.updateActivation(mem, current_state_);
     }
-
-    // 5. VÉRIFIER AMYGHALEON (court-circuit)
-    if (amyghaleon_.checkEmergency(current_state_, memories, phase_config.amyghaleon_threshold)) {
-        auto response = amyghaleon_.triggerEmergencyResponse(current_state_, current_phase);
-        
-        // En phase PEUR, créer un trauma potentiel
-        if (current_phase == Phase::PEUR) {
-            memory_manager_.createPotentialTrauma(current_state_);
-        }
-        
-        // Publier l'état d'urgence
-        publishState();
-        return;  // Court-circuit
-    }
-
+    
+    // 5. VÉRIFIER AMYGHALEON (court-circuit d'urgence)
+    handleEmergency(match);
+    
     // 6. CALCULER LE DELTA TEMPS
     auto now = std::chrono::steady_clock::now();
     double delta_t = std::chrono::duration<double>(now - last_update_time_).count();
     last_update_time_ = now;
-
-    // 7. CALCULER L'INFLUENCE DES SOUVENIRS
-    auto memory_influences = memory_manager_.computeMemoryInfluences(
-        memories, phase_config.delta
-    );
-
-    // 8. METTRE À JOUR LA SAGESSE
+    
+    // 7. METTRE À JOUR LA SAGESSE
     updateWisdom();
-
-    // 9. METTRE À JOUR LES ÉMOTIONS
+    
+    // 8. CONFIGURER EmotionUpdater AVEC LES COEFFICIENTS DU PATTERN
+    PhaseConfig pattern_config;
+    pattern_config.alpha = match.alpha;
+    pattern_config.beta = match.beta;
+    pattern_config.gamma = match.gamma;
+    pattern_config.delta = match.delta;
+    pattern_config.theta = match.theta;
+    pattern_config.amyghaleon_threshold = match.emergency_threshold;
+    pattern_config.memory_consolidation = match.memory_trigger_threshold;
+    
+    emotion_updater_.setCoefficientsFromPhase(pattern_config);
+    
+    // 9. CALCULER L'INFLUENCE DES SOUVENIRS
+    auto memory_influences = memory_manager_.computeMemoryInfluences(
+        memories, match.delta
+    );
+    
+    // 10. METTRE À JOUR LES ÉMOTIONS
     emotion_updater_.updateAllEmotions(
         current_state_,
         current_feedback_,
@@ -387,39 +487,49 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
         memory_influences,
         wisdom_
     );
-
-    // 10. CALCULER LA VARIANCE GLOBALE
+    
+    // 11. CALCULER LA VARIANCE GLOBALE
     current_state_.variance_global = emotion_updater_.computeGlobalVariance(
         current_state_, memories
     );
-
-    // 11. CALCULER E_GLOBAL
+    
+    // 12. CALCULER E_GLOBAL
     current_state_.E_global = emotion_updater_.computeEGlobal(
         current_state_,
         previous_state_.E_global,
         current_state_.variance_global
     );
-
-    // 12. GÉRER LES BOUCLES EN PHASE PEUR
-    if (current_phase == Phase::PEUR) {
-        handleFearLoop();
+    
+    // 13. REPOUSSER L'ÉTAT TRAITÉ DANS LA MCT (feedback loop)
+    if (mct_) {
+        if (!last_speech_analysis_.raw_text.empty()) {
+            mct_->pushWithSpeech(current_state_, 
+                                 last_speech_analysis_.sentiment_score,
+                                 last_speech_analysis_.arousal_score,
+                                 last_speech_analysis_.raw_text);
+        } else {
+            mct_->push(current_state_);
+        }
     }
-
-    // 13. ENREGISTRER UN SOUVENIR SI SIGNIFICATIF
-    if (current_state_.getMeanIntensity() > 0.5) {
+    
+    // 14. CONSOLIDER EN MLT SI SIGNIFICATIF
+    consolidateToMLT();
+    
+    // 15. ENREGISTRER UN SOUVENIR SI SIGNIFICATIF
+    if (current_state_.getMeanIntensity() > match.memory_trigger_threshold) {
         auto [dominant, value] = current_state_.getDominant();
-        memory_manager_.recordMemory(current_state_, current_phase, 
-            "Auto_" + dominant + "_" + std::to_string(now.time_since_epoch().count()));
+        std::string context = "Pattern:" + match.pattern_name + "_" + dominant;
+        memory_manager_.recordMemory(current_state_, current_phase, context);
     }
-
-    // 14. PUBLIER L'ÉTAT
+    
+    // 16. PUBLIER L'ÉTAT
     publishState();
-
-    // 15. CALLBACK
+    
+    // 17. CALLBACK
     if (on_state_change_) {
-        on_state_change_(current_state_, current_phase);
+        on_state_change_(current_state_, match.pattern_name);
     }
-
+    
     // Afficher l'état
     printState();
 }
@@ -428,7 +538,9 @@ void MCEEEngine::printState() const {
     auto [dominant, value] = current_state_.getDominant();
     
     std::cout << "\n[MCEEEngine] État émotionnel mis à jour:\n";
-    std::cout << "  Phase     : " << phaseToString(phase_detector_.getCurrentPhase()) << "\n";
+    std::cout << "  Pattern   : " << current_match_.pattern_name 
+              << " (sim=" << std::fixed << std::setprecision(2) << current_match_.similarity 
+              << ", conf=" << current_match_.confidence << ")\n";
     std::cout << "  Dominant  : " << dominant << " = " 
               << std::fixed << std::setprecision(3) << value << "\n";
     std::cout << "  E_global  : " << std::fixed << std::setprecision(3) 
@@ -438,7 +550,15 @@ void MCEEEngine::printState() const {
     std::cout << "  Valence   : " << std::fixed << std::setprecision(3) 
               << current_state_.getValence() << "\n";
     std::cout << "  Intensité : " << std::fixed << std::setprecision(3) 
-              << current_state_.getMeanIntensity() << "\n\n";
+              << current_state_.getMeanIntensity() << "\n";
+    
+    // Afficher métriques MCT si disponible
+    if (mct_ && !mct_->empty()) {
+        std::cout << "  MCT       : size=" << mct_->size() 
+                  << ", stability=" << std::fixed << std::setprecision(2) << mct_->getStability()
+                  << ", trend=" << mct_->getTrend() << "\n";
+    }
+    std::cout << "\n";
 }
 
 void MCEEEngine::publishState() {
@@ -462,22 +582,46 @@ void MCEEEngine::publishState() {
         output["dominant"] = dominant;
         output["dominant_value"] = value;
 
-        // Phase
+        // Pattern actif (v3.0)
+        output["pattern"]["id"] = current_match_.pattern_id;
+        output["pattern"]["name"] = current_match_.pattern_name;
+        output["pattern"]["similarity"] = current_match_.similarity;
+        output["pattern"]["confidence"] = current_match_.confidence;
+        output["pattern"]["is_new"] = current_match_.is_new_pattern;
+        output["pattern"]["is_transition"] = current_match_.is_transition;
+
+        // Coefficients actifs (du pattern)
+        output["coefficients"]["alpha"] = current_match_.alpha;
+        output["coefficients"]["beta"] = current_match_.beta;
+        output["coefficients"]["gamma"] = current_match_.gamma;
+        output["coefficients"]["delta"] = current_match_.delta;
+        output["coefficients"]["theta"] = current_match_.theta;
+        output["coefficients"]["emergency_threshold"] = current_match_.emergency_threshold;
+
+        // Phase legacy (pour compatibilité)
         output["phase"] = phaseToString(phase_detector_.getCurrentPhase());
         output["phase_duration"] = phase_detector_.getPhaseDuration();
 
-        // Coefficients actifs
-        const auto& config = phase_detector_.getCurrentConfig();
-        output["coefficients"]["alpha"] = config.alpha;
-        output["coefficients"]["beta"] = config.beta;
-        output["coefficients"]["gamma"] = config.gamma;
-        output["coefficients"]["delta"] = config.delta;
-        output["coefficients"]["theta"] = config.theta;
+        // Métriques MCT
+        if (mct_) {
+            output["mct"]["size"] = mct_->size();
+            output["mct"]["stability"] = mct_->getStability();
+            output["mct"]["volatility"] = mct_->getVolatility();
+            output["mct"]["trend"] = mct_->getTrend();
+        }
 
         // Statistiques
-        output["stats"]["phase_transitions"] = stats_.phase_transitions;
+        output["stats"]["pattern_transitions"] = stats_.phase_transitions;
         output["stats"]["emergency_triggers"] = stats_.emergency_triggers;
         output["stats"]["wisdom"] = wisdom_;
+        
+        if (mlt_) {
+            output["stats"]["total_patterns"] = mlt_->patternCount();
+        }
+        if (pattern_matcher_) {
+            output["stats"]["total_matches"] = pattern_matcher_->getTotalMatches();
+            output["stats"]["patterns_created"] = pattern_matcher_->getPatternsCreated();
+        }
 
         std::string body = output.dump();
         channel_->BasicPublish(
@@ -516,32 +660,6 @@ void MCEEEngine::updateWisdom() {
 
     wisdom_ = std::clamp(wisdom_, 0.0, 1.0);
     stats_.wisdom = wisdom_;
-}
-
-void MCEEEngine::handleFearLoop() {
-    double phase_duration = phase_detector_.getPhaseDuration();
-
-    // Si en phase PEUR depuis > 60 secondes, forcer décroissance
-    if (phase_duration > 60.0) {
-        current_state_.setEmotion("Peur", 
-            current_state_.getEmotion("Peur") * 0.95);
-        current_state_.setEmotion("Horreur", 
-            current_state_.getEmotion("Horreur") * 0.95);
-
-        std::cout << "[MCEEEngine] Décroissance forcée des émotions de peur "
-                  << "(durée: " << std::fixed << std::setprecision(1) 
-                  << phase_duration << "s)\n";
-    }
-
-    // Si > 5 minutes, forcer transition vers ANXIÉTÉ
-    if (phase_duration > 300.0) {
-        double peur = current_state_.getEmotion("Peur");
-        double horreur = current_state_.getEmotion("Horreur");
-        
-        if (std::max(peur, horreur) < 0.6) {
-            phase_detector_.forceTransition(Phase::ANXIETE, "FEAR_TIMEOUT");
-        }
-    }
 }
 
 void MCEEEngine::executeEmergencyAction(const EmergencyResponse& response) {
@@ -587,6 +705,178 @@ EmotionalState MCEEEngine::rawToState(
     }
 
     return state;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÉTHODES MCT/MLT V3.0
+// ═══════════════════════════════════════════════════════════════════════════
+
+void MCEEEngine::pushToMCT(const EmotionalState& state) {
+    if (!mct_) return;
+    
+    if (!last_speech_analysis_.raw_text.empty()) {
+        mct_->pushWithSpeech(state, 
+                             last_speech_analysis_.sentiment_score,
+                             last_speech_analysis_.arousal_score,
+                             last_speech_analysis_.raw_text);
+    } else {
+        mct_->push(state);
+    }
+}
+
+MatchResult MCEEEngine::identifyPattern() {
+    if (!pattern_matcher_) {
+        // Fallback si pas de PatternMatcher
+        MatchResult fallback;
+        fallback.pattern_name = "DEFAULT";
+        fallback.similarity = 0.0;
+        fallback.confidence = 0.0;
+        fallback.alpha = 0.3;
+        fallback.beta = 0.2;
+        fallback.gamma = 0.15;
+        fallback.delta = 0.1;
+        fallback.theta = 0.25;
+        fallback.emergency_threshold = 0.8;
+        fallback.memory_trigger_threshold = 0.5;
+        return fallback;
+    }
+    
+    return pattern_matcher_->match();
+}
+
+EmotionalState MCEEEngine::applyPatternCoefficients(const EmotionalState& raw_state, 
+                                                     const MatchResult& match) {
+    EmotionalState result = raw_state;
+    
+    // Les coefficients sont appliqués via EmotionUpdater dans processPipeline
+    // Cette méthode peut être utilisée pour un pré-traitement si nécessaire
+    
+    // Pondérer l'état par la confiance du match
+    double confidence_factor = 0.5 + 0.5 * match.confidence;
+    
+    for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+        result.emotions[i] *= confidence_factor;
+    }
+    
+    return result;
+}
+
+void MCEEEngine::consolidateToMLT() {
+    if (!mct_ || !mlt_ || !pattern_matcher_) return;
+    
+    // Vérifier si l'état actuel est significatif
+    double intensity = current_state_.getMeanIntensity();
+    double stability = mct_->getStability();
+    
+    bool is_significant = (intensity > current_match_.memory_trigger_threshold) ||
+                          (std::abs(last_speech_analysis_.sentiment_score) > 0.5) ||
+                          (last_speech_analysis_.urgency_score > 0.7);
+    
+    if (!is_significant) return;
+    
+    // Si stable et significatif, renforcer le pattern actuel
+    if (stability > 0.6 && !current_match_.pattern_id.empty()) {
+        auto sig_opt = mct_->extractSignature();
+        if (sig_opt) {
+            // Mettre à jour le pattern avec la nouvelle signature
+            double feedback = (last_speech_analysis_.sentiment_score + 1.0) / 2.0; // [0,1]
+            mlt_->updatePattern(current_match_.pattern_id, *sig_opt, feedback);
+        }
+    }
+    
+    // Déclencher une passe d'apprentissage périodiquement
+    if (stats_.phase_transitions % 10 == 0 && stats_.phase_transitions > 0) {
+        mlt_->runLearningPass();
+    }
+}
+
+void MCEEEngine::handleEmergency(const MatchResult& match) {
+    // Vérifier le seuil d'urgence du pattern
+    double max_emotion = 0.0;
+    for (const auto& e : current_state_.emotions) {
+        max_emotion = std::max(max_emotion, e);
+    }
+    
+    // Récupérer les souvenirs pertinents
+    Phase current_phase = phase_detector_.getCurrentPhase();
+    auto memories = memory_manager_.queryRelevantMemories(current_phase, current_state_, 5);
+    
+    if (amyghaleon_.checkEmergency(current_state_, memories, match.emergency_threshold)) {
+        auto response = amyghaleon_.triggerEmergencyResponse(current_state_, current_phase);
+        
+        // Créer un trauma potentiel si pattern est PEUR ou similaire
+        if (match.pattern_name.find("PEUR") != std::string::npos ||
+            match.pattern_name.find("FEAR") != std::string::npos) {
+            memory_manager_.createPotentialTrauma(current_state_);
+        }
+        
+        // Court-circuiter et publier l'état d'urgence
+        publishState();
+    }
+}
+
+std::string MCEEEngine::getCurrentPatternName() const {
+    if (!current_match_.pattern_name.empty()) {
+        return current_match_.pattern_name;
+    }
+    return phaseToString(phase_detector_.getCurrentPhase());
+}
+
+std::string MCEEEngine::getCurrentPatternId() const {
+    return current_match_.pattern_id;
+}
+
+bool MCEEEngine::loadPatterns(const std::string& path) {
+    if (!mlt_) return false;
+    return mlt_->loadFromFile(path);
+}
+
+bool MCEEEngine::savePatterns(const std::string& path) const {
+    if (!mlt_) return false;
+    return mlt_->saveToFile(path);
+}
+
+void MCEEEngine::forcePattern(const std::string& pattern_name, const std::string& reason) {
+    if (!mlt_ || !pattern_matcher_) return;
+    
+    auto pattern = mlt_->getPatternByName(pattern_name);
+    if (pattern) {
+        // Mettre à jour le match courant
+        current_match_.pattern_id = pattern->id;
+        current_match_.pattern_name = pattern->name;
+        current_match_.similarity = 1.0;
+        current_match_.confidence = pattern->confidence;
+        current_match_.alpha = pattern->alpha;
+        current_match_.beta = pattern->beta;
+        current_match_.gamma = pattern->gamma;
+        current_match_.delta = pattern->delta;
+        current_match_.theta = pattern->theta;
+        current_match_.emergency_threshold = pattern->emergency_threshold;
+        current_match_.memory_trigger_threshold = pattern->memory_trigger_threshold;
+        
+        // Notifier le PatternMatcher
+        pattern_matcher_->notifyPatternChange(pattern->id);
+        
+        std::cout << "[MCEEEngine] Pattern forcé: " << pattern_name 
+                  << " (raison: " << reason << ")\n";
+    }
+}
+
+std::string MCEEEngine::createPatternFromCurrent(const std::string& name, 
+                                                  const std::string& description) {
+    if (!pattern_matcher_) return "";
+    return pattern_matcher_->forceCreatePattern(name, description);
+}
+
+void MCEEEngine::provideFeedback(double feedback) {
+    if (!pattern_matcher_) return;
+    pattern_matcher_->provideFeedback(feedback);
+}
+
+void MCEEEngine::runLearning() {
+    if (!mlt_) return;
+    mlt_->runLearningPass();
+    std::cout << "[MCEEEngine] Passe d'apprentissage MLT terminée\n";
 }
 
 } // namespace mcee

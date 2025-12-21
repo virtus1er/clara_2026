@@ -1,21 +1,23 @@
 /**
  * @file MCEEEngine.hpp
  * @brief Moteur principal du MCEE (Modèle Complet d'Évaluation des États)
- * @version 2.0
- * @date 2025-12-19
+ * @version 3.0
+ * @date 2024
  * 
- * Le MCEEEngine orchestre:
- * - La réception des émotions via RabbitMQ
- * - La détection de phase
- * - La mise à jour des émotions
- * - La gestion de la mémoire
- * - Le système d'urgence Amyghaleon
+ * Architecture MCT/MLT avec patterns dynamiques :
+ * - MCT (Mémoire Court Terme) : Buffer temporel des états
+ * - MLT (Mémoire Long Terme) : Patterns émotionnels dynamiques
+ * - PatternMatcher : Identification et création de patterns
+ * - Amyghaleon : Système d'urgence
  */
 
 #ifndef MCEE_ENGINE_HPP
 #define MCEE_ENGINE_HPP
 
 #include "Types.hpp"
+#include "MCT.hpp"
+#include "MLT.hpp"
+#include "PatternMatcher.hpp"
 #include "PhaseDetector.hpp"
 #include "EmotionUpdater.hpp"
 #include "Amyghaleon.hpp"
@@ -29,6 +31,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 
 namespace mcee {
 
@@ -58,11 +61,18 @@ struct RabbitMQConfig {
 
 /**
  * @class MCEEEngine
- * @brief Moteur principal du système MCEE v2.0
+ * @brief Moteur principal du système MCEE v3.0 avec MCT/MLT
+ * 
+ * Flux de traitement :
+ * 1. Réception émotions/parole → MCT (buffer)
+ * 2. Extraction signature MCT → PatternMatcher
+ * 3. Comparaison avec MLT → Pattern identifié
+ * 4. Coefficients dynamiques → EmotionUpdater
+ * 5. Nouvelle émotion → MCT + consolidation MLT
  */
 class MCEEEngine {
 public:
-    using StateCallback = std::function<void(const EmotionalState&, Phase)>;
+    using StateCallback = std::function<void(const EmotionalState&, const std::string& pattern_name)>;
 
     /**
      * @brief Constructeur
@@ -129,9 +139,14 @@ public:
     [[nodiscard]] const EmotionalState& getCurrentState() const { return current_state_; }
 
     /**
-     * @brief Retourne la phase actuelle
+     * @brief Retourne le nom du pattern actuel (remplace Phase)
      */
-    [[nodiscard]] Phase getCurrentPhase() const { return phase_detector_.getCurrentPhase(); }
+    [[nodiscard]] std::string getCurrentPatternName() const;
+
+    /**
+     * @brief Retourne l'ID du pattern actuel
+     */
+    [[nodiscard]] std::string getCurrentPatternId() const;
 
     /**
      * @brief Retourne les statistiques
@@ -139,11 +154,9 @@ public:
     [[nodiscard]] const MCEEStats& getStats() const { return stats_; }
 
     /**
-     * @brief Retourne la configuration de la phase actuelle
+     * @brief Retourne les coefficients actuels du pattern
      */
-    [[nodiscard]] const PhaseConfig& getPhaseConfig() const { 
-        return phase_detector_.getCurrentConfig(); 
-    }
+    [[nodiscard]] MatchResult getCurrentMatchResult() const { return current_match_; }
 
     /**
      * @brief Charge la configuration depuis un fichier JSON
@@ -153,20 +166,72 @@ public:
     bool loadConfig(const std::string& config_path);
 
     /**
-     * @brief Force une transition de phase
+     * @brief Charge les patterns depuis un fichier
      */
-    void forcePhaseTransition(Phase phase, const std::string& reason = "MANUAL");
+    bool loadPatterns(const std::string& path);
+
+    /**
+     * @brief Sauvegarde les patterns dans un fichier
+     */
+    bool savePatterns(const std::string& path) const;
+
+    /**
+     * @brief Force un pattern spécifique
+     */
+    void forcePattern(const std::string& pattern_name, const std::string& reason = "MANUAL");
+
+    /**
+     * @brief Crée un nouveau pattern à partir de l'état actuel
+     */
+    std::string createPatternFromCurrent(const std::string& name, const std::string& description = "");
 
     /**
      * @brief Retourne le gestionnaire de mémoire
      */
     MemoryManager& getMemoryManager() { return memory_manager_; }
 
+    /**
+     * @brief Retourne la MCT
+     */
+    std::shared_ptr<MCT> getMCT() { return mct_; }
+
+    /**
+     * @brief Retourne la MLT
+     */
+    std::shared_ptr<MLT> getMLT() { return mlt_; }
+
+    /**
+     * @brief Retourne le PatternMatcher
+     */
+    std::shared_ptr<PatternMatcher> getPatternMatcher() { return pattern_matcher_; }
+
+    /**
+     * @brief Envoie un feedback sur le pattern actuel
+     * @param feedback Score [-1, 1]
+     */
+    void provideFeedback(double feedback);
+
+    /**
+     * @brief Déclenche une passe d'apprentissage MLT
+     */
+    void runLearning();
+
+    // Compatibilité legacy (Phase)
+    [[nodiscard]] Phase getCurrentPhase() const { return phase_detector_.getCurrentPhase(); }
+    [[nodiscard]] const PhaseConfig& getPhaseConfig() const { return phase_detector_.getCurrentConfig(); }
+    void forcePhaseTransition(Phase phase, const std::string& reason = "MANUAL");
+
 private:
     // Configuration
     RabbitMQConfig rabbitmq_config_;
 
-    // Composants MCEE
+    // Nouveau système MCT/MLT (v3)
+    std::shared_ptr<MCT> mct_;
+    std::shared_ptr<MLT> mlt_;
+    std::shared_ptr<PatternMatcher> pattern_matcher_;
+    MatchResult current_match_;
+
+    // Composants legacy (pour compatibilité)
     PhaseDetector phase_detector_;
     EmotionUpdater emotion_updater_;
     Amyghaleon amyghaleon_;
@@ -195,11 +260,17 @@ private:
 
     // Timestamps
     std::chrono::steady_clock::time_point last_update_time_;
+    std::chrono::steady_clock::time_point pattern_start_time_;
 
     /**
      * @brief Initialise la connexion RabbitMQ
      */
     bool initRabbitMQ();
+
+    /**
+     * @brief Initialise le système MCT/MLT
+     */
+    void initMemorySystem();
 
     /**
      * @brief Boucle de consommation des émotions RabbitMQ
@@ -224,10 +295,30 @@ private:
     void handleSpeechMessage(const std::string& body);
 
     /**
-     * @brief Pipeline de traitement MCEE complet
+     * @brief Pipeline de traitement MCEE v3 complet
      * @param raw_emotions Émotions brutes du module C++
      */
     void processPipeline(const std::unordered_map<std::string, double>& raw_emotions);
+
+    /**
+     * @brief Étape 1: Ajoute l'état brut à la MCT
+     */
+    void pushToMCT(const EmotionalState& state);
+
+    /**
+     * @brief Étape 2: Identifie le pattern via MLT
+     */
+    MatchResult identifyPattern();
+
+    /**
+     * @brief Étape 3: Applique les coefficients du pattern
+     */
+    EmotionalState applyPatternCoefficients(const EmotionalState& raw_state, const MatchResult& match);
+
+    /**
+     * @brief Étape 4: Consolide en MLT si significatif
+     */
+    void consolidateToMLT();
 
     /**
      * @brief Publie l'état actuel via RabbitMQ
@@ -240,9 +331,9 @@ private:
     void updateWisdom();
 
     /**
-     * @brief Gère les boucles infinies en phase PEUR
+     * @brief Gère les urgences (patterns à seuil bas)
      */
-    void handleFearLoop();
+    void handleEmergency(const MatchResult& match);
 
     /**
      * @brief Exécute une action d'urgence
@@ -258,6 +349,11 @@ private:
      * @brief Affiche l'état émotionnel actuel
      */
     void printState() const;
+
+    /**
+     * @brief Configure les callbacks MCT/MLT/Matcher
+     */
+    void setupCallbacks();
 };
 
 } // namespace mcee

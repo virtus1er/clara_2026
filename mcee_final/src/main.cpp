@@ -191,7 +191,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Définir un callback pour afficher les changements d'état
-        engine.setStateCallback([](const EmotionalState& state, Phase phase) {
+        engine.setStateCallback([](const EmotionalState& state, const std::string& pattern_name) {
             // Le callback est appelé à chaque mise à jour
             // On peut ajouter du logging ou des actions ici
         });

@@ -1,271 +1,339 @@
 # MCEE - Modèle Complet d'Évaluation des États
 
-**Version 2.0** | 19 décembre 2025
+## Version 3.0 - Architecture MCT/MLT avec Patterns Dynamiques
 
-## Vue d'ensemble
-
-Le MCEE est un système émotionnel complet qui intègre :
-- **24 émotions instantanées** (reçues du module C++ emotion)
-- **Entrées textuelles** (reçues du module de parole)
-- **Système de phases émotionnelles** (8 phases qui modulent le comportement)
-- **Gestion de la mémoire** (souvenirs, concepts, traumas - préparé pour Neo4j)
-- **Mécanismes de fusion et modulation** (adaptatifs selon la phase)
-- **Système d'urgence « Amyghaleon »** (déclenché selon la phase)
-
-## Architecture
+Le MCEE est un système avancé de traitement émotionnel en temps réel. La version 3.0 introduit une architecture révolutionnaire basée sur des **patterns émotionnels dynamiques** qui remplacent les phases fixes.
 
 ```
-┌─────────────────────┐     ┌─────────────────────┐
-│  Module C++ Emotion │     │  Module Parole      │
-│  (24 émotions)      │     │  (texte transcrit)  │
-└─────────┬───────────┘     └─────────┬───────────┘
-          │                           │
-          │ RabbitMQ                  │ RabbitMQ
-          │ mcee.emotional.input      │ mcee.speech.input
-          │                           │
-          ▼                           ▼
-┌─────────────────────────────────────────────────┐
-│                  MCEE Engine                     │
-├─────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌─────────────────────┐     │
-│  │   Phase     │    │   Speech Input      │     │
-│  │   Detector  │    │   (analyse texte)   │     │
-│  └──────┬──────┘    └──────────┬──────────┘     │
-│         │                      │                 │
-│         ▼                      ▼                 │
-│  ┌─────────────────────────────────────────┐    │
-│  │         Emotion Updater                  │    │
-│  │   E_i(t+1) = E_i(t) + α·Fb_ext + ...    │    │
-│  └──────────────────┬──────────────────────┘    │
-│                     │                            │
-│         ┌───────────┴───────────┐               │
-│         ▼                       ▼               │
-│  ┌─────────────┐         ┌─────────────┐        │
-│  │  Memory     │         │  Amyghaleon │        │
-│  │  Manager    │         │  (urgences) │        │
-│  └─────────────┘         └─────────────┘        │
-└─────────────────────────────────────────────────┘
-          │
-          │ RabbitMQ
-          │ mcee.emotional.output
-          ▼
-    [État émotionnel complet]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          MCEE v3.0 Architecture                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐     ┌──────────────┐     ┌──────────────┐               │
+│   │   Émotions   │────▶│     MCT      │────▶│   Pattern    │               │
+│   │   (24 dim)   │     │  (Buffer)    │     │   Matcher    │               │
+│   └──────────────┘     └──────────────┘     └──────┬───────┘               │
+│                              │                      │                       │
+│   ┌──────────────┐           │                      │                       │
+│   │   Parole     │───────────┘                      ▼                       │
+│   │  (Texte)     │                          ┌──────────────┐               │
+│   └──────────────┘                          │     MLT      │               │
+│                                             │  (Patterns)  │               │
+│                                             └──────┬───────┘               │
+│                                                    │                       │
+│                          ┌─────────────────────────┴──────────────┐        │
+│                          │                                        │        │
+│                          ▼                                        ▼        │
+│                   ┌──────────────┐                        ┌──────────────┐ │
+│                   │  Coefficients │                        │   Pattern    │ │
+│                   │  Dynamiques   │                        │   Lifecycle  │ │
+│                   │  (α,β,γ,δ,θ)  │                        │  (Create/    │ │
+│                   └──────┬───────┘                        │   Merge/     │ │
+│                          │                                │   Decay)     │ │
+│                          ▼                                └──────────────┘ │
+│                   ┌──────────────┐                                         │
+│                   │   Emotion    │                                         │
+│                   │   Updater    │──────▶ État Émotionnel Traité          │
+│                   └──────────────┘                                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Flux de données
+## Nouveautés v3.0
 
-1. **Module Emotion C++** → Envoie 24 émotions via RabbitMQ
-2. **Module Parole** → Envoie le texte transcrit via RabbitMQ
-3. **Phase Detector** → Détecte la phase émotionnelle actuelle
-4. **Speech Input** → Analyse le texte (sentiment, arousal, urgence)
-5. **Emotion Updater** → Met à jour les émotions avec tous les feedbacks
-6. **Memory Manager** → Gère les souvenirs et leur influence
-7. **Amyghaleon** → Vérifie les conditions d'urgence
-8. **Sortie** → Publie l'état émotionnel complet
+### 🧠 Patterns Dynamiques (remplace les 8 phases fixes)
+- **Création automatique** : Nouveaux patterns émergent de l'expérience
+- **Apprentissage** : Les coefficients évoluent avec le feedback
+- **Fusion** : Patterns similaires fusionnent automatiquement
+- **Déclin** : Patterns non utilisés s'effacent progressivement
 
-## Les 8 Phases Émotionnelles
+### 💾 Système de Mémoire MCT/MLT
+- **MCT (Mémoire Court Terme)** : Buffer glissant des 30 dernières secondes
+- **MLT (Mémoire Long Terme)** : Stockage persistant des patterns appris
+- **PatternMatcher** : Identification et création intelligente de patterns
 
-| Phase | α | δ | γ | θ | Seuil A. | Comportement |
-|-------|------|------|------|------|----------|--------------|
-| SÉRÉNITÉ | 0.25 | 0.30 | 0.12 | 0.10 | 0.85 | Équilibre, apprentissage optimal |
-| JOIE | 0.40 | 0.35 | 0.08 | 0.05 | 0.95 | Euphorie, renforcement positif |
-| EXPLORATION | 0.35 | 0.25 | 0.10 | 0.15 | 0.80 | Apprentissage maximal |
-| ANXIÉTÉ | 0.40 | 0.45 | 0.06 | 0.08 | 0.70 | Hypervigilance, biais négatif |
-| **PEUR** △! | 0.60 | 0.70 | 0.02 | 0.02 | **0.50** | URGENCE - Traumas dominants |
-| TRISTESSE | 0.20 | 0.55 | 0.05 | 0.12 | 0.90 | Rumination, introspection |
-| DÉGOÛT | 0.50 | 0.40 | 0.08 | 0.08 | 0.75 | Évitement, associations négatives |
-| CONFUSION | 0.35 | 0.50 | 0.15 | 0.15 | 0.80 | Recherche d'info, incertitude |
+### 🎯 Coefficients Adaptatifs
+Chaque pattern a ses propres coefficients qui s'adaptent :
+- `α (alpha)` : Poids des émotions dominantes
+- `β (beta)` : Poids de la mémoire
+- `γ (gamma)` : Poids du feedback externe
+- `δ (delta)` : Poids de l'environnement
+- `θ (theta)` : Poids de l'état précédent (inertie)
 
-## Formules Clés
+## Architecture des Composants
 
-### Mise à jour des émotions
-```
-E_i(t+1) = E_i(t) + α·Fb_ext + β·Fb_int - γ·Δt + δ·IS + θ·Wt
-```
+### MCT - Mémoire Court Terme
+```cpp
+MCTConfig config;
+config.max_size = 60;              // 60 états max
+config.time_window_seconds = 30.0; // Fenêtre de 30s
+config.decay_factor = 0.95;        // Décroissance temporelle
 
-### Fusion globale
-```
-E_global(t+1) = tanh(E_global(t) + Σ[E_i(t+1) × (1 - Var_global)])
-```
-
-### Activation des souvenirs
-```
-A(Si) = forget × (1 + R) × Σ[C × Me × U]
+// Méthodes principales
+mct->push(state);                  // Ajouter un état
+mct->extractSignature();           // Obtenir la signature 24D
+mct->getStability();               // Stabilité [0, 1]
+mct->getTrend();                   // Tendance [-1, +1]
 ```
 
-## Prérequis
+### MLT - Mémoire Long Terme
+```cpp
+// 8 patterns de base initialisés automatiquement :
+// SERENITE, JOIE, EXPLORATION, ANXIETE, PEUR, TRISTESSE, DEGOUT, CONFUSION
 
-- CMake 3.14+
-- Compilateur C++20 (GCC 10+, Clang 12+)
-- Boost (system, thread)
-- RabbitMQ + SimpleAmqpClient
-- nlohmann/json (téléchargé automatiquement via FetchContent)
+// Nouveaux patterns créés dynamiquement :
+std::string id = mlt->createPattern(signature, "CUSTOM_PATTERN");
+
+// Mise à jour par apprentissage
+mlt->updatePattern(id, signature, feedback);
+
+// Fusion automatique de patterns similaires
+mlt->autoMerge();
+
+// Nettoyage des patterns obsolètes
+mlt->prune();
+```
+
+### PatternMatcher
+```cpp
+// Matching automatique MCT → MLT
+MatchResult match = pattern_matcher->match();
+
+// Le résultat contient :
+match.pattern_id          // ID unique
+match.pattern_name        // Nom lisible (ex: "JOIE")
+match.similarity          // Similarité cosinus [0, 1]
+match.confidence          // Confiance du pattern [0, 1]
+match.alpha, beta, ...    // Coefficients à utiliser
+match.is_new_pattern      // true si pattern nouvellement créé
+match.is_transition       // true si changement de pattern
+```
+
+## Pipeline de Traitement v3.0
+
+```
+1. Réception émotions brutes (24 dimensions)
+       │
+2. Push vers MCT (buffer temporel)
+       │
+3. Extraction signature MCT (moyenne pondérée + métriques)
+       │
+4. PatternMatcher : Comparaison avec MLT
+       │
+       ├── Similarité > 0.85 → Utiliser pattern existant
+       ├── Similarité 0.6-0.85 → Modifier pattern
+       └── Similarité < 0.6 → Créer nouveau pattern
+       │
+5. Application coefficients du pattern
+       │
+6. EmotionUpdater avec coefficients dynamiques
+       │
+7. Consolidation MLT (si significatif)
+       │
+8. Publication état via RabbitMQ
+```
+
+## Configuration
+
+### RabbitMQ
+```json
+{
+  "host": "localhost",
+  "port": 5672,
+  "user": "virtus",
+  "password": "virtus@83",
+  "emotions_exchange": "mcee.emotional.input",
+  "speech_exchange": "mcee.speech.input",
+  "output_exchange": "mcee.emotional.output"
+}
+```
+
+### Format de Sortie JSON
+```json
+{
+  "emotions": {
+    "Joie": 0.65,
+    "Peur": 0.12
+  },
+  "pattern": {
+    "id": "PAT_abc123",
+    "name": "JOIE",
+    "similarity": 0.92,
+    "confidence": 0.85,
+    "is_new": false,
+    "is_transition": true
+  },
+  "coefficients": {
+    "alpha": 0.35,
+    "beta": 0.20,
+    "gamma": 0.15,
+    "delta": 0.10,
+    "theta": 0.20,
+    "emergency_threshold": 0.85
+  },
+  "mct": {
+    "size": 45,
+    "stability": 0.78,
+    "volatility": 0.22,
+    "trend": 0.15
+  },
+  "E_global": 0.42,
+  "valence": 0.53,
+  "intensity": 0.38
+}
+```
 
 ## Compilation
 
 ```bash
 mkdir build && cd build
 cmake ..
-make -j$(nproc)
+make -j4
 ```
+
+### Dépendances
+- C++20
+- nlohmann/json (FetchContent)
+- SimpleAmqpClient
+- RabbitMQ (librabbitmq)
+- Boost (system, thread)
 
 ## Utilisation
 
-### Mode normal (avec RabbitMQ)
-```bash
-./mcee
+### Démarrage
+```cpp
+RabbitMQConfig config;
+config.host = "localhost";
+
+MCEEEngine engine(config);
+engine.start();
 ```
 
-### Mode démonstration
-```bash
-./mcee --demo
+### API v3.0
+```cpp
+// Obtenir le pattern actuel
+std::string pattern = engine.getCurrentPatternName();
+
+// Forcer un pattern spécifique
+engine.forcePattern("SERENITE", "Manual override");
+
+// Créer un pattern à partir de l'état actuel
+std::string new_id = engine.createPatternFromCurrent("MON_PATTERN", "Description");
+
+// Envoyer un feedback sur le matching
+engine.provideFeedback(0.8);  // Bon match
+
+// Déclencher une passe d'apprentissage
+engine.runLearning();
+
+// Sauvegarder/Charger les patterns
+engine.savePatterns("patterns.json");
+engine.loadPatterns("patterns.json");
 ```
 
-### Options
+## Émotions Supportées (24)
+
+| Index | Émotion      | Index | Émotion       |
+|-------|--------------|-------|---------------|
+| 0     | Joie         | 12    | Envie         |
+| 1     | Tristesse    | 13    | Gratitude     |
+| 2     | Peur         | 14    | Espoir        |
+| 3     | Colère       | 15    | Désespoir     |
+| 4     | Surprise     | 16    | Ennui         |
+| 5     | Dégoût       | 17    | Curiosité     |
+| 6     | Confiance    | 18    | Confusion     |
+| 7     | Anticipation | 19    | Émerveillement|
+| 8     | Amour        | 20    | Mépris        |
+| 9     | Culpabilité  | 21    | Embarras      |
+| 10    | Honte        | 22    | Excitation    |
+| 11    | Fierté       | 23    | Sérénité      |
+
+## Patterns de Base
+
+| Pattern     | Émotions Dominantes           | Seuil Urgence |
+|-------------|-------------------------------|---------------|
+| SERENITE    | Sérénité, Confiance, Espoir   | 0.90          |
+| JOIE        | Joie, Excitation, Fierté      | 0.85          |
+| EXPLORATION | Curiosité, Anticipation, Awe  | 0.80          |
+| ANXIETE     | Peur (modérée), Anticipation  | 0.70          |
+| PEUR        | Peur (intense), Surprise      | 0.50          |
+| TRISTESSE   | Tristesse, Désespoir          | 0.75          |
+| DEGOUT      | Dégoût, Mépris, Colère        | 0.70          |
+| CONFUSION   | Confusion, Surprise           | 0.75          |
+
+## Cycle de Vie des Patterns
+
 ```
-./mcee [options]
-  -h, --help            Affiche l'aide
-  -c, --config <file>   Fichier de configuration JSON
-  --host <host>         Hôte RabbitMQ (défaut: localhost)
-  --port <port>         Port RabbitMQ (défaut: 5672)
-  --user <user>         Utilisateur RabbitMQ (défaut: virtus)
-  --pass <password>     Mot de passe RabbitMQ
-  --demo                Mode démonstration
+                    ┌─────────────────┐
+                    │   CRÉATION      │
+                    │ (nouvelle exp.) │
+                    └────────┬────────┘
+                             │
+                             ▼
+┌─────────────────┐   ┌──────────────┐   ┌─────────────────┐
+│    FUSION       │◀──│   RENFORCEMENT│──▶│    DÉCLIN       │
+│ (sim > 0.92)    │   │  (activations)│   │ (non utilisé)   │
+└────────┬────────┘   └──────────────┘   └────────┬────────┘
+         │                                         │
+         └────────────────┬────────────────────────┘
+                          │
+                          ▼
+                    ┌─────────────────┐
+                    │     OUBLI       │
+                    │ (force < 0.1)   │
+                    └─────────────────┘
 ```
 
-## Configuration
+## Migration v2.0 → v3.0
 
-Le fichier `config/phase_config.json` permet de personnaliser :
-- Les coefficients de chaque phase (α, β, γ, δ, θ)
-- Les seuils Amyghaleon
-- Les paramètres du détecteur de phase
-- La configuration RabbitMQ
-- Les paramètres de mémoire
+Les phases fixes sont remplacées par des patterns. Le mapping :
+- `Phase::SERENITE` → Pattern "SERENITE"
+- `Phase::JOIE` → Pattern "JOIE"
+- etc.
 
-## Structure du projet
+Les anciennes APIs restent disponibles pour compatibilité :
+```cpp
+// Legacy (fonctionne toujours)
+Phase phase = engine.getCurrentPhase();
+
+// Nouveau (recommandé)
+std::string pattern = engine.getCurrentPatternName();
+```
+
+## Fichiers du Projet
 
 ```
 mcee/
 ├── CMakeLists.txt
 ├── README.md
 ├── config/
-│   └── phase_config.json
+│   └── phase_config.json      # Config patterns de base
 ├── include/
-│   ├── Types.hpp           # Types et structures de données
-│   ├── PhaseConfig.hpp     # Configurations des 8 phases
-│   ├── PhaseDetector.hpp   # Détecteur de phases émotionnelles
-│   ├── EmotionUpdater.hpp  # Mise à jour des émotions (formule MCEE)
-│   ├── Amyghaleon.hpp      # Système d'urgence
-│   ├── MemoryManager.hpp   # Gestionnaire de mémoire
-│   ├── SpeechInput.hpp     # Analyse des textes de parole
-│   └── MCEEEngine.hpp      # Moteur principal
+│   ├── Types.hpp              # Types de base (EmotionalState, etc.)
+│   ├── MCT.hpp                # Mémoire Court Terme
+│   ├── MLT.hpp                # Mémoire Long Terme
+│   ├── PatternMatcher.hpp     # Matching MCT/MLT
+│   ├── MCEEEngine.hpp         # Moteur principal
+│   ├── PhaseDetector.hpp      # Legacy (compatibilité)
+│   ├── EmotionUpdater.hpp     # Mise à jour émotions
+│   ├── Amyghaleon.hpp         # Système urgence
+│   ├── MemoryManager.hpp      # Gestion souvenirs
+│   └── SpeechInput.hpp        # Analyse parole
 └── src/
     ├── main.cpp
+    ├── MCEEEngine.cpp
+    ├── MCT.cpp
+    ├── MLT.cpp
+    ├── PatternMatcher.cpp
     ├── PhaseDetector.cpp
     ├── EmotionUpdater.cpp
     ├── Amyghaleon.cpp
     ├── MemoryManager.cpp
-    ├── SpeechInput.cpp
-    └── MCEEEngine.cpp
+    └── SpeechInput.cpp
 ```
-
-## Communication RabbitMQ
-
-### Entrée Émotions (depuis module emotion C++)
-- Exchange: `mcee.emotional.input`
-- Routing Key: `emotions.predictions`
-- Format JSON:
-```json
-{
-  "Admiration": 0.123,
-  "Joie": 0.856,
-  "Peur": 0.045,
-  ...
-}
-```
-
-### Entrée Parole (depuis module speech)
-- Exchange: `mcee.speech.input`
-- Routing Key: `speech.text`
-- Format JSON:
-```json
-{
-  "text": "Bonjour, je suis content de te voir",
-  "source": "user",
-  "confidence": 0.95
-}
-```
-
-### Sortie État MCEE
-- Exchange: `mcee.emotional.output`
-- Routing Key: `mcee.state`
-- Format: JSON avec état complet (émotions, phase, coefficients, stats)
-
-## Exemple de sortie JSON
-
-```json
-{
-  "emotions": {
-    "Admiration": 0.123,
-    "Joie": 0.856,
-    "Peur": 0.045,
-    ...
-  },
-  "E_global": 0.542,
-  "variance_global": 0.087,
-  "valence": 0.723,
-  "intensity": 0.456,
-  "dominant": "Joie",
-  "dominant_value": 0.856,
-  "phase": "JOIE",
-  "phase_duration": 45.2,
-  "coefficients": {
-    "alpha": 0.40,
-    "beta": 0.25,
-    "gamma": 0.08,
-    "delta": 0.35,
-    "theta": 0.05
-  },
-  "speech": {
-    "last_sentiment": 0.65,
-    "last_arousal": 0.45,
-    "texts_processed": 12
-  },
-  "stats": {
-    "phase_transitions": 3,
-    "emergency_triggers": 0,
-    "wisdom": 0.045
-  }
-}
-```
-
-## Module SpeechInput
-
-Le module `SpeechInput` analyse les textes reçus pour :
-
-1. **Analyse de sentiment** : Score de -1 (négatif) à +1 (positif)
-2. **Analyse d'arousal** : Niveau d'activation de 0 (calme) à 1 (excité)
-3. **Détection de menaces** : Mots-clés de danger (peur, mort, urgence...)
-4. **Extraction de mots-clés** : Mots significatifs pour le contexte
-5. **Score d'urgence** : Combinaison menace + arousal + sentiment négatif
-
-Le feedback externe (`Fb_ext`) est calculé à partir de cette analyse :
-```
-Fb_ext = sentiment × (1 + arousal × 0.5) + bonus_menace + bonus_positif
-```
-
-## Roadmap
-
-- [x] Phase 1: Base avec Phases
-- [x] Phase 2: Mémoire modulée (local)
-- [ ] Phase 3: Intégration Neo4j
-- [ ] Phase 4: Amyghaleon adaptatif avancé
-- [ ] Phase 5: Module Rêve
-
-## Licence
-
-Projet propriétaire - Virtus AI
 
 ---
 
-*MCEE v2.0 - Système de phases émotionnelles*
+**Version 3.0** - Architecture MCT/MLT avec Patterns Dynamiques  
+Auteur: virtus1er  
+Date: Décembre 2024
