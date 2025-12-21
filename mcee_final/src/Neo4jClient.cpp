@@ -29,13 +29,16 @@ bool Neo4jClient::connect() {
     }
 
     try {
-        // Créer le canal RabbitMQ
-        channel_ = AmqpClient::Channel::Create(
-            config_.rabbitmq_host,
-            config_.rabbitmq_port,
+        // Créer le canal RabbitMQ avec Channel::Open (méthode recommandée)
+        AmqpClient::Channel::OpenOpts opts;
+        opts.host = config_.rabbitmq_host;
+        opts.port = config_.rabbitmq_port;
+        opts.auth = AmqpClient::Channel::OpenOpts::BasicAuth{
             config_.rabbitmq_user,
             config_.rabbitmq_password
-        );
+        };
+
+        channel_ = AmqpClient::Channel::Open(opts);
 
         // Déclarer la queue de requêtes
         channel_->DeclareQueue(config_.request_queue, false, true, false, false);
