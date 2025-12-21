@@ -823,9 +823,10 @@ class Neo4jService:
             """, id=session_id, limit=state_limit)
 
             record = result.single()
-            if record:
+            if record and record['s'] is not None:
                 s = record['s']
-                states = [dict(e) for e in record['states']]
+                # Filtrer les états None (du OPTIONAL MATCH)
+                states = [dict(e) for e in record['states'] if e is not None]
                 return {
                     **dict(s),
                     'recent_states': states
