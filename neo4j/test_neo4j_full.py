@@ -392,6 +392,156 @@ class Neo4jFullTest:
         return False
 
     # ═══════════════════════════════════════════════════════════════════════
+    # TESTS MODULE DREAMS (Consolidation nocturne)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_get_mct_stats(self) -> bool:
+        """Test statistiques mémoire court terme"""
+        # Créer quelques mémoires MCT
+        for i in range(3):
+            test_id = f"TEST_MCT_STATS_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': [0.5 + i * 0.1] + [0.0] * 23,
+                'dominant': 'Joie',
+                'intensity': 0.6 + i * 0.1,
+                'weight': 0.5,
+                'type': 'MCT'
+            })
+
+        response = self.client.send_request('get_mct_stats', {})
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Type: {data.get('type')}")
+            print(f"  → Total MCT: {data.get('total_count')}")
+            print(f"  → Poids moyen: {data.get('avg_weight', 0):.2f}")
+            print(f"  → Intensité moyenne: {data.get('avg_intensity', 0):.2f}")
+            print(f"  → Traumas: {data.get('trauma_count')}")
+            print(f"  → Working actives: {data.get('working_active_count')}")
+            return data.get('type') == 'MCT'
+        return False
+
+    def test_get_mlt_stats(self) -> bool:
+        """Test statistiques mémoire long terme"""
+        response = self.client.send_request('get_mlt_stats', {})
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Type: {data.get('type')}")
+            print(f"  → Total MLT: {data.get('total_count')}")
+            print(f"  → Score consolidation moyen: {data.get('avg_consolidation_score') or 0:.2f}")
+            print(f"  → Par catégorie: {data.get('by_category', {})}")
+            return data.get('type') == 'MLT'
+        return False
+
+    def test_consolidate_all_mct(self) -> bool:
+        """Test consolidation de toutes les MCT éligibles vers MLT"""
+        # Créer des mémoires MCT avec haute intensité (éligibles)
+        for i in range(2):
+            test_id = f"TEST_CONSOLIDATE_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': [0.9] + [0.0] * 23,
+                'dominant': 'Extase',
+                'intensity': 0.85,  # Haute intensité = éligible
+                'weight': 0.8,
+                'type': 'MCT'
+            })
+
+        response = self.client.send_request('consolidate_all_mct', {
+            'importance_threshold': 0.6
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoires consolidées: {data.get('consolidated_count')}")
+            for mem in data.get('consolidated_memories', [])[:3]:
+                print(f"    - {mem.get('id')}: score={mem.get('score', 0):.2f}")
+            return True
+        return False
+
+    def test_cleanup_mct(self) -> bool:
+        """Test nettoyage des MCT expirées"""
+        # Créer une mémoire MCT avec faible poids (sera archivée/supprimée)
+        test_id = f"TEST_CLEANUP_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+
+        self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.2] + [0.0] * 23,
+            'dominant': 'Ennui',
+            'intensity': 0.2,
+            'weight': 0.05,  # Très faible poids
+            'type': 'MCT'
+        })
+
+        response = self.client.send_request('cleanup_mct', {
+            'max_age_hours': 0,  # Age 0 = toutes les MCT anciennes
+            'min_weight': 0.2,
+            'archive_threshold': 0.1
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Archivées: {data.get('archived')}")
+            print(f"  → Supprimées: {data.get('deleted')}")
+            print(f"  → Working désactivées: {data.get('working_deactivated')}")
+            return True
+        return False
+
+    def test_dream_cycle(self) -> bool:
+        """Test cycle de rêve complet (consolidation + nettoyage)"""
+        # Créer des mémoires MCT variées
+        # Haute importance (sera consolidée)
+        test_id_high = f"TEST_DREAM_HIGH_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id_high)
+        self.client.send_request('create_memory', {
+            'id': test_id_high,
+            'emotions': [0.95] + [0.0] * 23,
+            'dominant': 'Extase',
+            'intensity': 0.95,
+            'weight': 0.9,
+            'type': 'MCT'
+        })
+
+        # Basse importance (sera nettoyée si vieille)
+        test_id_low = f"TEST_DREAM_LOW_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id_low)
+        self.client.send_request('create_memory', {
+            'id': test_id_low,
+            'emotions': [0.1] + [0.0] * 23,
+            'dominant': 'Ennui',
+            'intensity': 0.1,
+            'weight': 0.1,
+            'type': 'MCT'
+        })
+
+        # Exécuter le cycle de rêve
+        response = self.client.send_request('dream_cycle', {
+            'importance_threshold': 0.6,
+            'max_mct_age_hours': 24,
+            'min_weight_to_keep': 0.2
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Cycle terminé: {data.get('dream_cycle_completed')}")
+
+            consolidation = data.get('consolidation', {})
+            print(f"  → Consolidées: {consolidation.get('consolidated_count')}")
+
+            cleanup = data.get('cleanup', {})
+            print(f"  → Archivées: {cleanup.get('archived')}")
+            print(f"  → Supprimées: {cleanup.get('deleted')}")
+
+            print(f"  → Liens MLT renforcés: {data.get('reinforced_mlt_links')}")
+            return data.get('dream_cycle_completed', False)
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
     # TESTS PATTERNS
     # ═══════════════════════════════════════════════════════════════════════
 
@@ -794,6 +944,13 @@ class Neo4jFullTest:
 
         # Decay
         self.run_test("Application du decay (oubli)", self.test_apply_decay)
+
+        # Module Dreams
+        self.run_test("Stats MCT", self.test_get_mct_stats)
+        self.run_test("Stats MLT", self.test_get_mlt_stats)
+        self.run_test("Consolidation MCT → MLT", self.test_consolidate_all_mct)
+        self.run_test("Nettoyage MCT", self.test_cleanup_mct)
+        self.run_test("Cycle de rêve complet", self.test_dream_cycle)
 
         # Patterns
         self.run_test("Gestion des patterns", self.test_patterns)

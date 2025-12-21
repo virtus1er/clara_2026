@@ -34,6 +34,13 @@ class RequestType(Enum):
     GET_AUTOBIOGRAPHIC = "get_autobiographic"  # Mémoire autobiographique
     LINK_ASSOCIATIVE = "link_associative"      # Lien associatif (odeurs, etc.)
 
+    # Module Dreams (Consolidation nocturne)
+    DREAM_CYCLE = "dream_cycle"               # Cycle complet: consolidation + nettoyage
+    CONSOLIDATE_ALL_MCT = "consolidate_all_mct"  # Consolider toutes les MCT éligibles
+    CLEANUP_MCT = "cleanup_mct"               # Nettoyer les MCT expirées
+    GET_MCT_STATS = "get_mct_stats"           # Stats mémoire court terme
+    GET_MLT_STATS = "get_mlt_stats"           # Stats mémoire long terme
+
     # Patterns
     GET_PATTERN = "get_pattern"
     UPDATE_PATTERN = "update_pattern"
@@ -151,6 +158,12 @@ class Neo4jService:
             RequestType.CREATE_PROCEDURAL.value: self._handle_create_procedural,
             RequestType.GET_AUTOBIOGRAPHIC.value: self._handle_get_autobiographic,
             RequestType.LINK_ASSOCIATIVE.value: self._handle_link_associative,
+            # Module Dreams
+            RequestType.DREAM_CYCLE.value: self._handle_dream_cycle,
+            RequestType.CONSOLIDATE_ALL_MCT.value: self._handle_consolidate_all_mct,
+            RequestType.CLEANUP_MCT.value: self._handle_cleanup_mct,
+            RequestType.GET_MCT_STATS.value: self._handle_get_mct_stats,
+            RequestType.GET_MLT_STATS.value: self._handle_get_mlt_stats,
             # Patterns
             RequestType.GET_PATTERN.value: self._handle_get_pattern,
             RequestType.UPDATE_PATTERN.value: self._handle_update_pattern,
@@ -833,6 +846,254 @@ class Neo4jService:
                 return dict(record)
 
         return {'error': 'Could not create semantic relation'}
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HANDLERS MODULE DREAMS (Consolidation nocturne)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _handle_dream_cycle(self, payload: Dict) -> Dict:
+        """
+        Exécute un cycle de rêve complet:
+        1. Consolide les mémoires MCT importantes vers MLT
+        2. Nettoie les MCT expirées/faibles
+
+        C'est l'opération principale du module Dreams.
+        """
+        importance_threshold = payload.get('importance_threshold', 0.6)
+        max_mct_age_hours = payload.get('max_mct_age_hours', 24)
+        min_weight_to_keep = payload.get('min_weight_to_keep', 0.2)
+
+        # Phase 1: Consolidation MCT → MLT
+        consolidation_result = self._handle_consolidate_all_mct({
+            'importance_threshold': importance_threshold
+        })
+
+        # Phase 2: Nettoyage MCT
+        cleanup_result = self._handle_cleanup_mct({
+            'max_age_hours': max_mct_age_hours,
+            'min_weight': min_weight_to_keep
+        })
+
+        # Phase 3: Renforcement des liens MLT (replay nocturne)
+        with self.driver.session() as session:
+            # Renforcer les connexions entre mémoires MLT récemment consolidées
+            reinforce_result = session.run("""
+                MATCH (m1:Memory {type: 'MLT'})-[r:ASSOCIE]->(m2:Memory {type: 'MLT'})
+                WHERE m1.consolidated_at > datetime() - duration('P1D')
+                   OR m2.consolidated_at > datetime() - duration('P1D')
+                SET r.strength = CASE
+                    WHEN r.strength + 0.05 > 1.0 THEN 1.0
+                    ELSE r.strength + 0.05
+                END,
+                r.dream_reinforced = true,
+                r.last_dream_at = datetime()
+                RETURN count(r) AS reinforced_links
+            """)
+            reinforced = reinforce_result.single()['reinforced_links']
+
+        return {
+            'dream_cycle_completed': True,
+            'consolidation': consolidation_result,
+            'cleanup': cleanup_result,
+            'reinforced_mlt_links': reinforced
+        }
+
+    def _handle_consolidate_all_mct(self, payload: Dict) -> Dict:
+        """
+        Consolide toutes les mémoires MCT éligibles vers MLT.
+
+        Critères d'éligibilité:
+        - Intensité émotionnelle élevée
+        - Trauma (toujours consolidé)
+        - Nombre d'activations élevé
+        - Importance calculée
+        """
+        importance_threshold = payload.get('importance_threshold', 0.6)
+
+        with self.driver.session() as session:
+            # Consolider les MCT éligibles
+            result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MCT' AND (m.consolidated IS NULL OR m.consolidated = false)
+                WITH m,
+                     CASE
+                         WHEN m.trauma = true THEN 1.0
+                         WHEN m.intensity >= 0.8 THEN m.intensity
+                         WHEN COALESCE(m.activation_count, 1) >= 5 THEN 0.85
+                         WHEN COALESCE(m.activation_count, 1) >= 3 THEN 0.7
+                         ELSE m.weight * m.intensity
+                     END AS consolidation_score
+                WHERE consolidation_score >= $threshold
+                SET m.type = 'MLT',
+                    m.consolidated = true,
+                    m.consolidated_at = datetime(),
+                    m.consolidation_score = consolidation_score,
+                    m.source_type = 'MCT'
+                RETURN m.id AS id, consolidation_score AS score, m.dominant AS dominant
+            """, threshold=importance_threshold)
+
+            consolidated = [dict(r) for r in result]
+
+            # Créer des liens épisodiques entre les mémoires consolidées du même jour
+            if len(consolidated) > 1:
+                ids = [c['id'] for c in consolidated]
+                session.run("""
+                    UNWIND $ids AS id1
+                    UNWIND $ids AS id2
+                    WITH id1, id2 WHERE id1 < id2
+                    MATCH (m1:Memory {id: id1})
+                    MATCH (m2:Memory {id: id2})
+                    MERGE (m1)-[r:EPISODIC_LINK]->(m2)
+                    ON CREATE SET r.created_at = datetime(), r.context = 'dream_consolidation'
+                """, ids=ids)
+
+        return {
+            'consolidated_count': len(consolidated),
+            'consolidated_memories': consolidated
+        }
+
+    def _handle_cleanup_mct(self, payload: Dict) -> Dict:
+        """
+        Nettoie les mémoires MCT expirées ou trop faibles.
+
+        Les mémoires sont soit:
+        - Archivées (si elles ont une certaine valeur)
+        - Supprimées (si trop faibles)
+        """
+        max_age_hours = payload.get('max_age_hours', 24)
+        min_weight = payload.get('min_weight', 0.2)
+        archive_threshold = payload.get('archive_threshold', 0.1)
+
+        with self.driver.session() as session:
+            # Archiver les MCT faibles mais pas négligeables
+            archive_result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MCT'
+                  AND (m.consolidated IS NULL OR m.consolidated = false)
+                  AND (m.trauma IS NULL OR m.trauma = false)
+                  AND m.weight < $min_weight
+                  AND m.weight >= $archive_threshold
+                  AND m.created_at < datetime() - duration({hours: $max_age})
+                WITH m LIMIT 100
+                CREATE (a:ArchivedMemory:MCTArchive)
+                SET a = properties(m),
+                    a.archived_at = datetime(),
+                    a.archive_reason = 'dream_cleanup_weak'
+                WITH m, a
+                DETACH DELETE m
+                RETURN count(a) AS archived
+            """, min_weight=min_weight, archive_threshold=archive_threshold, max_age=max_age_hours)
+            archived_count = archive_result.single()['archived']
+
+            # Supprimer les MCT très faibles et anciennes
+            delete_result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MCT'
+                  AND (m.consolidated IS NULL OR m.consolidated = false)
+                  AND (m.trauma IS NULL OR m.trauma = false)
+                  AND m.weight < $archive_threshold
+                  AND m.created_at < datetime() - duration({hours: $max_age})
+                WITH m LIMIT 100
+                DETACH DELETE m
+                RETURN count(m) AS deleted
+            """, archive_threshold=archive_threshold, max_age=max_age_hours)
+            deleted_count = delete_result.single()['deleted']
+
+            # Désactiver la mémoire de travail (fin de journée)
+            deactivate_result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.working_active = true
+                SET m.working_active = false,
+                    m.working_deactivated_at = datetime()
+                RETURN count(m) AS deactivated
+            """)
+            deactivated_count = deactivate_result.single()['deactivated']
+
+        return {
+            'archived': archived_count,
+            'deleted': deleted_count,
+            'working_deactivated': deactivated_count
+        }
+
+    def _handle_get_mct_stats(self, payload: Dict) -> Dict:
+        """Récupère les statistiques de la mémoire à court terme (MCT)"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MCT' OR (m.type IS NULL AND (m.consolidated IS NULL OR m.consolidated = false))
+                WITH m
+                RETURN
+                    count(m) AS total_count,
+                    avg(m.weight) AS avg_weight,
+                    avg(m.intensity) AS avg_intensity,
+                    sum(CASE WHEN m.trauma = true THEN 1 ELSE 0 END) AS trauma_count,
+                    sum(CASE WHEN m.working_active = true THEN 1 ELSE 0 END) AS working_active_count,
+                    avg(COALESCE(m.activation_count, 1)) AS avg_activations,
+                    min(m.created_at) AS oldest_memory,
+                    max(m.created_at) AS newest_memory
+            """)
+
+            record = result.single()
+            return {
+                'type': 'MCT',
+                'total_count': record['total_count'],
+                'avg_weight': record['avg_weight'],
+                'avg_intensity': record['avg_intensity'],
+                'trauma_count': record['trauma_count'],
+                'working_active_count': record['working_active_count'],
+                'avg_activations': record['avg_activations'],
+                'oldest_memory': str(record['oldest_memory']) if record['oldest_memory'] else None,
+                'newest_memory': str(record['newest_memory']) if record['newest_memory'] else None
+            }
+
+    def _handle_get_mlt_stats(self, payload: Dict) -> Dict:
+        """Récupère les statistiques de la mémoire à long terme (MLT)"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MLT' OR m.consolidated = true
+                WITH m
+                RETURN
+                    count(m) AS total_count,
+                    avg(m.weight) AS avg_weight,
+                    avg(m.intensity) AS avg_intensity,
+                    sum(CASE WHEN m.trauma = true THEN 1 ELSE 0 END) AS trauma_count,
+                    avg(m.consolidation_score) AS avg_consolidation_score,
+                    avg(COALESCE(m.activation_count, 1)) AS avg_activations,
+                    min(m.consolidated_at) AS oldest_consolidation,
+                    max(m.consolidated_at) AS newest_consolidation
+            """)
+
+            record = result.single()
+
+            # Compter les différents types de mémoires MLT
+            type_result = session.run("""
+                MATCH (m:Memory)
+                WHERE m.type = 'MLT' OR m.consolidated = true
+                WITH m,
+                     CASE
+                         WHEN m:Procedural THEN 'Procedural'
+                         WHEN m:Autobiographic THEN 'Autobiographic'
+                         WHEN m:Trauma THEN 'Trauma'
+                         ELSE 'Episodic'
+                     END AS memory_category
+                RETURN memory_category, count(*) AS count
+            """)
+
+            categories = {r['memory_category']: r['count'] for r in type_result}
+
+            return {
+                'type': 'MLT',
+                'total_count': record['total_count'],
+                'avg_weight': record['avg_weight'],
+                'avg_intensity': record['avg_intensity'],
+                'trauma_count': record['trauma_count'],
+                'avg_consolidation_score': record['avg_consolidation_score'],
+                'avg_activations': record['avg_activations'],
+                'oldest_consolidation': str(record['oldest_consolidation']) if record['oldest_consolidation'] else None,
+                'newest_consolidation': str(record['newest_consolidation']) if record['newest_consolidation'] else None,
+                'by_category': categories
+            }
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HANDLERS PATTERNS
