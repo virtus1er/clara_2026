@@ -266,10 +266,11 @@ class Neo4jService:
                 keywords = words
 
         with self.driver.session() as session:
-            # Créer le souvenir
+            # Créer le souvenir (label dynamique via propriété type)
             result = session.run("""
-                CREATE (m:Memory:$type {
+                CREATE (m:Memory {
                     id: $id,
+                    type: $type,
                     emotions: $emotions,
                     dominant: $dominant,
                     intensity: $intensity,
