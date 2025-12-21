@@ -85,6 +85,8 @@ class Neo4jService:
                  neo4j_user: str = "neo4j",
                  neo4j_password: str = "",
                  rabbitmq_host: str = "localhost",
+                 rabbitmq_user: str = "guest",
+                 rabbitmq_pass: str = "guest",
                  request_queue: str = "neo4j.requests.queue",
                  response_exchange: str = "neo4j.responses"):
 
@@ -97,6 +99,8 @@ class Neo4jService:
 
         # RabbitMQ
         self.rabbitmq_host = rabbitmq_host
+        self.rabbitmq_user = rabbitmq_user
+        self.rabbitmq_pass = rabbitmq_pass
         self.request_queue = request_queue
         self.response_exchange = response_exchange
 
@@ -157,8 +161,9 @@ class Neo4jService:
 
     def _consume_loop(self):
         """Boucle de consommation RabbitMQ"""
+        credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_pass)
         connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=self.rabbitmq_host)
+            pika.ConnectionParameters(host=self.rabbitmq_host, credentials=credentials)
         )
         channel = connection.channel()
 
@@ -864,7 +869,9 @@ if __name__ == "__main__":
         neo4j_uri=os.getenv('NEO4J_URI', 'bolt://neo4j:7687'),
         neo4j_user=os.getenv('NEO4J_USER', 'neo4j'),
         neo4j_password=os.getenv('NEO4J_PASSWORD', ''),  # Empty = no auth (NEO4J_AUTH=none)
-        rabbitmq_host=os.getenv('RABBITMQ_HOST', 'rabbitmq')
+        rabbitmq_host=os.getenv('RABBITMQ_HOST', 'rabbitmq'),
+        rabbitmq_user=os.getenv('RABBITMQ_USER', 'guest'),
+        rabbitmq_pass=os.getenv('RABBITMQ_PASS', 'guest')
     )
 
     try:
