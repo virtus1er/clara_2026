@@ -1,8 +1,8 @@
 /**
  * @file MemoryManager.cpp
  * @brief Implémentation du gestionnaire de mémoire MCEE
- * @version 2.0
- * @date 2025-12-19
+ * @version 2.1
+ * @date 2025-12-21
  */
 
 #include "MemoryManager.hpp"
@@ -16,6 +16,138 @@ namespace mcee {
 
 MemoryManager::MemoryManager() {
     std::cout << "[MemoryManager] Gestionnaire de mémoire initialisé (mode local)\n";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTÉGRATION NEO4J
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool MemoryManager::setNeo4jConfig(const Neo4jClientConfig& config) {
+    neo4j_client_ = std::make_unique<Neo4jClient>(config);
+
+    if (neo4j_client_->connect()) {
+        neo4j_enabled_ = true;
+
+        // Créer une session dans Neo4j
+        neo4j_session_id_ = neo4j_client_->createSession("SERENITE");
+
+        std::cout << "[MemoryManager] Neo4j connecté (session=" << neo4j_session_id_ << ")\n";
+        return true;
+    }
+
+    std::cerr << "[MemoryManager] Échec connexion Neo4j\n";
+    neo4j_enabled_ = false;
+    return false;
+}
+
+bool MemoryManager::isNeo4jConnected() const {
+    return neo4j_enabled_ && neo4j_client_ && neo4j_client_->isConnected();
+}
+
+size_t MemoryManager::syncToNeo4j() {
+    if (!isNeo4jConnected()) {
+        return 0;
+    }
+
+    size_t synced = 0;
+
+    for (const auto& mem : memories_) {
+        std::string context = "Souvenir local synchronisé";
+
+        if (mem.is_trauma) {
+            neo4j_client_->createTrauma(mem, {});
+        } else {
+            neo4j_client_->createMemory(mem, context);
+        }
+        synced++;
+    }
+
+    std::cout << "[MemoryManager] " << synced << " souvenirs synchronisés vers Neo4j\n";
+    return synced;
+}
+
+size_t MemoryManager::loadFromNeo4j(const std::string& pattern_filter) {
+    if (!isNeo4jConnected()) {
+        return 0;
+    }
+
+    // Requête Cypher pour charger les souvenirs
+    std::string query;
+    nlohmann::json params;
+
+    if (pattern_filter.empty()) {
+        query = "MATCH (m:Memory) RETURN m LIMIT 100";
+    } else {
+        query = "MATCH (m:Memory) WHERE m.pattern_at_creation = $pattern RETURN m LIMIT 100";
+        params["pattern"] = pattern_filter;
+    }
+
+    auto result = neo4j_client_->executeCypher(query, params);
+
+    size_t loaded = 0;
+    if (result.is_array()) {
+        for (const auto& row : result) {
+            if (row.contains("m")) {
+                // Convertir le résultat en Memory
+                Memory mem;
+                auto& m = row["m"];
+                mem.name = m.value("id", "");
+                mem.dominant = m.value("dominant", "");
+                mem.intensity = m.value("intensity", 0.0);
+                mem.valence = m.value("valence", 0.5);
+                mem.weight = m.value("weight", 0.5);
+                mem.is_trauma = m.value("trauma", false);
+
+                if (m.contains("emotions") && m["emotions"].is_array()) {
+                    for (size_t i = 0; i < std::min(m["emotions"].size(), (size_t)NUM_EMOTIONS); ++i) {
+                        mem.emotions[i] = m["emotions"][i].get<double>();
+                    }
+                }
+
+                memories_.push_back(mem);
+                loaded++;
+            }
+        }
+    }
+
+    std::cout << "[MemoryManager] " << loaded << " souvenirs chargés depuis Neo4j\n";
+    return loaded;
+}
+
+std::vector<Memory> MemoryManager::findSimilarInNeo4j(
+    const EmotionalState& state,
+    double threshold,
+    size_t limit)
+{
+    std::vector<Memory> results;
+
+    if (!isNeo4jConnected()) {
+        return results;
+    }
+
+    auto similar = neo4j_client_->findSimilarMemories(state.emotions, threshold, limit);
+
+    for (const auto& [id, similarity] : similar) {
+        auto mem_opt = neo4j_client_->getMemory(id);
+        if (mem_opt.has_value()) {
+            results.push_back(mem_opt.value());
+        }
+    }
+
+    return results;
+}
+
+void MemoryManager::recordPatternTransition(
+    const std::string& from_pattern,
+    const std::string& to_pattern,
+    double duration_s,
+    const std::string& trigger)
+{
+    if (!isNeo4jConnected()) {
+        return;
+    }
+
+    neo4j_client_->recordPatternTransition(from_pattern, to_pattern, duration_s, trigger);
 }
 
 std::vector<Memory> MemoryManager::queryRelevantMemories(
@@ -119,12 +251,12 @@ std::array<double, NUM_EMOTIONS> MemoryManager::computeMemoryInfluences(
 Memory MemoryManager::recordMemory(
     const EmotionalState& state,
     Phase phase,
-    const std::string& context) 
+    const std::string& context)
 {
     Memory mem;
     mem.name = context;
     mem.emotions = state.emotions;
-    
+
     auto [dominant_name, dominant_value] = state.getDominant();
     mem.dominant = dominant_name;
     mem.valence = state.getValence();
@@ -138,9 +270,18 @@ Memory MemoryManager::recordMemory(
 
     memories_.push_back(mem);
 
-    std::cout << "[MemoryManager] Souvenir enregistré: \"" << context 
-              << "\" (phase=" << phaseToString(phase) 
-              << ", dominant=" << dominant_name 
+    // Synchroniser avec Neo4j si connecté
+    if (isNeo4jConnected()) {
+        neo4j_client_->createMemory(mem, context, [](const Neo4jResponse& resp) {
+            if (resp.success) {
+                std::cout << "[MemoryManager] Souvenir synchronisé vers Neo4j\n";
+            }
+        });
+    }
+
+    std::cout << "[MemoryManager] Souvenir enregistré: \"" << context
+              << "\" (phase=" << phaseToString(phase)
+              << ", dominant=" << dominant_name
               << ", poids=" << std::fixed << std::setprecision(2) << mem.weight << ")\n";
 
     return mem;
@@ -158,7 +299,7 @@ std::optional<Memory> MemoryManager::createPotentialTrauma(const EmotionalState&
         Memory trauma;
         trauma.name = "Trauma_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
         trauma.emotions = state.emotions;
-        
+
         auto [dominant_name, dominant_value] = state.getDominant();
         trauma.dominant = dominant_name;
         trauma.valence = valence;
@@ -172,7 +313,17 @@ std::optional<Memory> MemoryManager::createPotentialTrauma(const EmotionalState&
 
         memories_.push_back(trauma);
 
-        std::cout << "[MemoryManager] ⚠ TRAUMA créé (intensité=" 
+        // Synchroniser le trauma avec Neo4j si connecté
+        if (isNeo4jConnected()) {
+            std::vector<std::string> triggers = {trauma.dominant};
+            neo4j_client_->createTrauma(trauma, triggers, [](const Neo4jResponse& resp) {
+                if (resp.success) {
+                    std::cout << "[MemoryManager] Trauma synchronisé vers Neo4j\n";
+                }
+            });
+        }
+
+        std::cout << "[MemoryManager] TRAUMA créé (intensité="
                   << std::fixed << std::setprecision(3) << intensity << ")\n";
 
         return trauma;
@@ -252,19 +403,13 @@ void MemoryManager::applyForget(double decay_factor) {
                        [](const Memory& m) { return !m.is_trauma && m.weight < 0.01; }),
         memories_.end()
     );
-}
 
-void MemoryManager::setNeo4jConfig(
-    const std::string& uri,
-    const std::string& user,
-    const std::string& password) 
-{
-    neo4j_uri_ = uri;
-    neo4j_user_ = user;
-    neo4j_password_ = password;
-    
-    // TODO: Établir connexion Neo4j
-    std::cout << "[MemoryManager] Configuration Neo4j définie (connexion non implémentée)\n";
+    // Appliquer le decay dans Neo4j si connecté (async)
+    if (isNeo4jConnected()) {
+        // Convertir decay_factor en heures approximatives
+        double elapsed_hours = decay_factor * 100.0;  // Approximation
+        neo4j_client_->applyDecay(elapsed_hours);
+    }
 }
 
 double MemoryManager::computeEmotionalMatch(

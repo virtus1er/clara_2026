@@ -1,12 +1,12 @@
 /**
  * @file MemoryManager.hpp
  * @brief Gestionnaire de mémoire pour le MCEE (interface avec Neo4j)
- * @version 2.0
- * @date 2025-12-19
- * 
+ * @version 2.1
+ * @date 2025-12-21
+ *
  * Gère les souvenirs, concepts et traumas.
- * L'intégration Neo4j est prévue pour une phase ultérieure.
- * 
+ * Intégration Neo4j via RabbitMQ pour la persistance long terme.
+ *
  * Formule d'activation des souvenirs:
  * A(Si) = forget(Si,t) × (1 + R(Si)) × Σ[C(Si,Sk) × Me(Si,E_current) × U(Si)]
  */
@@ -16,10 +16,12 @@
 
 #include "Types.hpp"
 #include "PhaseConfig.hpp"
+#include "Neo4jClient.hpp"
 #include <vector>
 #include <string>
 #include <optional>
 #include <functional>
+#include <memory>
 
 namespace mcee {
 
@@ -119,23 +121,72 @@ public:
     void applyForget(double decay_factor = 0.01);
 
     /**
-     * @brief Définit la configuration Neo4j (pour future intégration)
+     * @brief Définit la configuration Neo4j et établit la connexion
+     * @param config Configuration du client Neo4j
+     * @return true si connexion réussie
      */
-    void setNeo4jConfig(
-        const std::string& uri,
-        const std::string& user,
-        const std::string& password
+    bool setNeo4jConfig(const Neo4jClientConfig& config);
+
+    /**
+     * @brief Vérifie si Neo4j est connecté
+     */
+    [[nodiscard]] bool isNeo4jConnected() const;
+
+    /**
+     * @brief Synchronise les souvenirs locaux vers Neo4j
+     * @return Nombre de souvenirs synchronisés
+     */
+    size_t syncToNeo4j();
+
+    /**
+     * @brief Charge les souvenirs depuis Neo4j
+     * @param pattern_filter Filtre optionnel par pattern
+     * @return Nombre de souvenirs chargés
+     */
+    size_t loadFromNeo4j(const std::string& pattern_filter = "");
+
+    /**
+     * @brief Recherche les souvenirs similaires dans Neo4j
+     * @param state État émotionnel de recherche
+     * @param threshold Seuil de similarité
+     * @param limit Nombre max de résultats
+     * @return Souvenirs similaires
+     */
+    std::vector<Memory> findSimilarInNeo4j(
+        const EmotionalState& state,
+        double threshold = 0.85,
+        size_t limit = 5
     );
 
+    /**
+     * @brief Enregistre une transition de pattern dans Neo4j
+     * @param from_pattern Pattern source
+     * @param to_pattern Pattern destination
+     * @param duration_s Durée en secondes
+     * @param trigger Déclencheur
+     */
+    void recordPatternTransition(
+        const std::string& from_pattern,
+        const std::string& to_pattern,
+        double duration_s = 0,
+        const std::string& trigger = ""
+    );
+
+    /**
+     * @brief Retourne le client Neo4j (pour accès avancé)
+     */
+    Neo4jClient* getNeo4jClient() { return neo4j_client_.get(); }
+
 private:
-    // Stockage local des souvenirs (avant intégration Neo4j)
+    // Stockage local des souvenirs
     std::vector<Memory> memories_;
-    
-    // Configuration Neo4j (future)
-    std::string neo4j_uri_;
-    std::string neo4j_user_;
-    std::string neo4j_password_;
-    bool neo4j_connected_ = false;
+
+    // Client Neo4j
+    std::unique_ptr<Neo4jClient> neo4j_client_;
+    bool neo4j_enabled_ = false;
+
+    // ID de session Neo4j
+    std::string neo4j_session_id_;
 
     /**
      * @brief Calcule la correspondance émotionnelle entre état et souvenir
