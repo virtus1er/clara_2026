@@ -16,6 +16,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def serialize_emotional_states(emotional_states: Dict) -> str:
+    """Sérialise emotional_states en JSON string pour Neo4j"""
+    if not emotional_states:
+        return "{}"
+    # Convertir toutes les clés en strings
+    return json.dumps({str(k): v for k, v in emotional_states.items()})
+
+
+def deserialize_emotional_states(json_str: str) -> Dict:
+    """Désérialise emotional_states depuis JSON string"""
+    if not json_str or json_str == "{}":
+        return {}
+    try:
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def merge_emotional_states_json(existing_json: str, new_states: Dict) -> str:
+    """Fusionne deux emotional_states et retourne le JSON résultant"""
+    existing = deserialize_emotional_states(existing_json)
+    for k, v in new_states.items():
+        existing[str(k)] = v
+    return serialize_emotional_states(existing)
+
+
 class RequestType(Enum):
     """Types de requêtes supportées"""
     # Mémoire de base
@@ -334,8 +360,8 @@ class Neo4jService:
             # Rétrocompatibilité: créer emotional_states à partir de sentence_id + emotions
             emotional_states = {str(sentence_id): emotions}
         
-        # Convertir les clés en string pour Neo4j (les maps Neo4j ont des clés string)
-        emotional_states_str = {str(k): v for k, v in emotional_states.items()}
+        # Sérialiser en JSON pour Neo4j (Neo4j ne supporte pas les Maps comme propriétés)
+        emotional_states_json = serialize_emotional_states(emotional_states)
 
         # Extraire les relations du contexte avec émotions
         relations = []
@@ -348,7 +374,7 @@ class Neo4jService:
                 keywords = [m['word'] for m in mots]
 
         with self.driver.session() as session:
-            # Créer le souvenir avec emotional_states
+            # Créer le souvenir avec emotional_states en JSON
             result = session.run("""
                 CREATE (m:Memory {
                     id: $id,
@@ -369,7 +395,7 @@ class Neo4jService:
             """,
                                  type=memory_type,
                                  id=memory_id,
-                                 emotional_states=emotional_states_str,
+                                 emotional_states=emotional_states_json,
                                  dominant=dominant,
                                  intensity=intensity,
                                  valence=valence,
@@ -381,12 +407,13 @@ class Neo4jService:
 
             created_id = result.single()['id']
 
-            # Créer les concepts avec emotional_states
+            # Créer les concepts avec emotional_states (JSON)
             for word_info in words_with_emotions:
                 word = word_info['word'] if isinstance(word_info, dict) else word_info
                 word_emotional_states = word_info.get('emotional_states', {str(sentence_id): emotions} if sentence_id else {}) if isinstance(word_info, dict) else ({str(sentence_id): emotions} if sentence_id else {})
-                word_emotional_states_str = {str(k): v for k, v in word_emotional_states.items()}
+                word_es_json = serialize_emotional_states(word_emotional_states)
                 
+                # Lire l'état actuel, fusionner, puis écrire
                 session.run("""
                     MERGE (c:Concept {name: $name})
                     ON CREATE SET 
@@ -397,20 +424,28 @@ class Neo4jService:
                         c.memory_ids = CASE
                             WHEN $mem_id IN c.memory_ids THEN c.memory_ids
                             ELSE c.memory_ids + $mem_id
-                        END,
-                        c.emotional_states = c.emotional_states + $emotional_states
+                        END
                     WITH c
                     MATCH (m:Memory {id: $mem_id})
                     MERGE (m)-[:EVOQUE]->(c)
-                """, name=word.lower(), mem_id=created_id, emotional_states=word_emotional_states_str)
+                """, name=word.lower(), mem_id=created_id, emotional_states=word_es_json)
+                
+                # Mettre à jour emotional_states en fusionnant (on le fait après le MERGE)
+                session.run("""
+                    MATCH (c:Concept {name: $name})
+                    SET c.emotional_states = CASE 
+                        WHEN c.emotional_states IS NULL OR c.emotional_states = '{}' THEN $es
+                        ELSE c.emotional_states
+                    END
+                """, name=word.lower(), es=word_es_json)
 
-            # Créer les relations sémantiques avec emotional_states
+            # Créer les relations sémantiques avec emotional_states (JSON)
             for rel_info in relations:
                 w1 = rel_info['source'] if isinstance(rel_info, dict) else rel_info[0]
                 rel_type = rel_info['relation'] if isinstance(rel_info, dict) else rel_info[1]
                 w2 = rel_info['target'] if isinstance(rel_info, dict) else rel_info[2]
                 rel_emotional_states = rel_info.get('emotional_states', {str(sentence_id): emotions} if sentence_id else {}) if isinstance(rel_info, dict) else ({str(sentence_id): emotions} if sentence_id else {})
-                rel_emotional_states_str = {str(k): v for k, v in rel_emotional_states.items()}
+                rel_es_json = serialize_emotional_states(rel_emotional_states)
                 
                 session.run("""
                     MERGE (c1:Concept {name: $w1})
@@ -422,8 +457,7 @@ class Neo4jService:
                         c1.memory_ids = CASE
                             WHEN $mem_id IN c1.memory_ids THEN c1.memory_ids
                             ELSE c1.memory_ids + $mem_id
-                        END,
-                        c1.emotional_states = c1.emotional_states + $emotional_states
+                        END
                     MERGE (c2:Concept {name: $w2})
                     ON CREATE SET 
                         c2.created_at = datetime(), 
@@ -433,8 +467,7 @@ class Neo4jService:
                         c2.memory_ids = CASE
                             WHEN $mem_id IN c2.memory_ids THEN c2.memory_ids
                             ELSE c2.memory_ids + $mem_id
-                        END,
-                        c2.emotional_states = c2.emotional_states + $emotional_states
+                        END
                     MERGE (c1)-[r:SEMANTIQUE {type: $rel_type}]->(c2)
                     ON CREATE SET 
                         r.count = 1, 
@@ -445,9 +478,8 @@ class Neo4jService:
                         r.memory_ids = CASE
                             WHEN $mem_id IN r.memory_ids THEN r.memory_ids
                             ELSE r.memory_ids + $mem_id
-                        END,
-                        r.emotional_states = r.emotional_states + $emotional_states
-                """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, mem_id=created_id, emotional_states=rel_emotional_states_str)
+                        END
+                """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, mem_id=created_id, emotional_states=rel_es_json)
 
             # Lier au pattern
             session.run("""
@@ -461,7 +493,7 @@ class Neo4jService:
             'keywords_extracted': keywords,
             'relations_created': len(relations),
             'sentence_id': sentence_id,
-            'emotional_states': emotional_states_str
+            'emotional_states': deserialize_emotional_states(emotional_states_json)
         }
 
     def _handle_merge_memory(self, payload: Dict) -> Dict:
@@ -475,10 +507,25 @@ class Neo4jService:
         # Rétrocompatibilité
         if sentence_id and not new_emotional_states:
             new_emotional_states = {str(sentence_id): emotions}
-        
-        new_emotional_states_str = {str(k): v for k, v in new_emotional_states.items()}
 
         with self.driver.session() as session:
+            # D'abord lire l'état actuel
+            read_result = session.run("""
+                MATCH (m:Memory {id: $target_id})
+                RETURN m.emotional_states AS current_es
+            """, target_id=target_id)
+            
+            record = read_result.single()
+            if not record:
+                return {'error': 'Memory not found'}
+            
+            current_es = deserialize_emotional_states(record['current_es'])
+            # Fusionner
+            for k, v in new_emotional_states.items():
+                current_es[str(k)] = v
+            merged_es_json = serialize_emotional_states(current_es)
+            
+            # Mettre à jour
             result = session.run("""
                 MATCH (m:Memory {id: $target_id})
                 SET m.weight = CASE WHEN m.weight + $transfer > 1.0 THEN 1.0 
@@ -486,19 +533,19 @@ class Neo4jService:
                 m.activation_count = m.activation_count + 1,
                 m.last_activated = datetime(),
                 m.merge_count = COALESCE(m.merge_count, 0) + 1,
-                m.emotional_states = COALESCE(m.emotional_states, {}) + $new_states
+                m.emotional_states = $merged_es
                 RETURN m.id AS id, m.weight AS new_weight, m.merge_count AS merges, 
                        m.emotional_states AS emotional_states
-            """, target_id=target_id, transfer=transfer_weight, new_states=new_emotional_states_str)
+            """, target_id=target_id, transfer=transfer_weight, merged_es=merged_es_json)
 
             record = result.single()
-            emotional_states = record['emotional_states'] if record else {}
+            emotional_states = deserialize_emotional_states(record['emotional_states']) if record else {}
             return {
                 'id': record['id'],
                 'new_weight': record['new_weight'],
                 'merge_count': record['merges'],
-                'emotional_states': dict(emotional_states) if emotional_states else {},
-                'sentence_ids': list(emotional_states.keys()) if emotional_states else []
+                'emotional_states': emotional_states,
+                'sentence_ids': list(emotional_states.keys())
             }
 
     def _handle_create_trauma(self, payload: Dict) -> Dict:
@@ -516,7 +563,7 @@ class Neo4jService:
         emotional_states = payload.get('emotional_states', {})
         if sentence_id and not emotional_states:
             emotional_states = {str(sentence_id): emotions}
-        emotional_states_str = {str(k): v for k, v in emotional_states.items()}
+        emotional_states_json = serialize_emotional_states(emotional_states)
 
         # Extraire les relations du contexte
         if context and not trigger_keywords:
@@ -547,7 +594,7 @@ class Neo4jService:
                 RETURN t.id AS id
             """,
                                  id=trauma_id,
-                                 emotional_states=emotional_states_str,
+                                 emotional_states=emotional_states_json,
                                  dominant=dominant,
                                  intensity=intensity,
                                  valence=valence,
@@ -557,7 +604,7 @@ class Neo4jService:
 
             created_id = result.single()['id']
 
-            # Créer les concepts déclencheurs avec emotional_states
+            # Créer les concepts déclencheurs avec emotional_states (JSON)
             for keyword in trigger_keywords:
                 session.run("""
                     MERGE (c:Concept {name: $name})
@@ -569,20 +616,19 @@ class Neo4jService:
                         c.memory_ids = CASE
                             WHEN $trauma_id IN c.memory_ids THEN c.memory_ids
                             ELSE c.memory_ids + $trauma_id
-                        END,
-                        c.emotional_states = c.emotional_states + $emotional_states
+                        END
                     WITH c
                     MATCH (t:Trauma {id: $trauma_id})
                     MERGE (t)-[:TRIGGERED_BY {strength: 0.9}]->(c)
                     SET c.trauma_associated = true,
                         c.emotional_valence_personal = -0.5
-                """, name=keyword.lower(), trauma_id=created_id, emotional_states=emotional_states_str)
+                """, name=keyword.lower(), trauma_id=created_id, emotional_states=emotional_states_json)
 
         return {
             'id': created_id,
             'trigger_keywords': trigger_keywords,
             'sentence_id': sentence_id,
-            'emotional_states': emotional_states_str
+            'emotional_states': emotional_states
         }
 
     def _handle_get_memory(self, payload: Dict) -> Optional[Dict]:
@@ -599,15 +645,21 @@ class Neo4jService:
             record = result.single()
             if record:
                 m = record['m']
-                emotional_states = m.get('emotional_states', {})
+                emotional_states = deserialize_emotional_states(m.get('emotional_states', '{}'))
                 
-                # Calculer les stats à partir de emotional_states
-                sentence_ids = list(emotional_states.keys()) if emotional_states else []
+                # Désérialiser les emotional_states des concepts
+                concepts = []
+                for c in record['concepts']:
+                    if c.get('name'):
+                        concepts.append({
+                            'name': c['name'],
+                            'emotional_states': deserialize_emotional_states(c.get('emotional_states', '{}'))
+                        })
                 
                 return {
                     'id': m['id'],
-                    'emotional_states': dict(emotional_states) if emotional_states else {},
-                    'sentence_ids': sentence_ids,
+                    'emotional_states': emotional_states,
+                    'sentence_ids': list(emotional_states.keys()),
                     'dominant': m['dominant'],
                     'intensity': m['intensity'],
                     'valence': m['valence'],
@@ -615,7 +667,7 @@ class Neo4jService:
                     'pattern': m.get('pattern_at_creation'),
                     'context': m.get('context'),
                     'keywords': m.get('keywords', []),
-                    'concepts': record['concepts'],
+                    'concepts': concepts,
                     'activation_count': m.get('activation_count', 0),
                     'trauma': m.get('trauma', False)
                 }
@@ -723,13 +775,13 @@ class Neo4jService:
 
             record = result.single()
             if record:
-                es = record['emotional_states'] or {}
+                es = deserialize_emotional_states(record['emotional_states'])
                 return {
                     'id': record['id'],
                     'new_weight': record['new_weight'],
                     'activations': record['activations'],
                     'sentence_ids': list(es.keys()),
-                    'emotional_states': dict(es)
+                    'emotional_states': es
                 }
 
         return {'error': 'Memory not found'}
@@ -765,7 +817,7 @@ class Neo4jService:
             # Vérifier si la mémoire est éligible à la consolidation
             result = session.run("""
                 MATCH (m:Memory {id: $id})
-                WHERE m.type = 'MCT' OR NOT EXISTS(m.consolidated)
+                WHERE m.type = 'MCT' OR m.consolidated IS NULL
                 WITH m,
                      CASE
                          WHEN m.trauma = true THEN 1.0
@@ -1007,8 +1059,11 @@ class Neo4jService:
 
     def _handle_get_transitions(self, payload: Dict) -> List[Dict]:
         """Récupère les transitions depuis un pattern"""
-        from_pattern = payload['from']
+        from_pattern = payload.get('from') or payload.get('from_pattern')
         limit = payload.get('limit', 10)
+
+        if not from_pattern:
+            return []
 
         with self.driver.session() as session:
             result = session.run("""
@@ -1019,19 +1074,23 @@ class Neo4jService:
                 LIMIT $limit
             """, **{'from': from_pattern}, limit=limit)
 
-            return [dict(r) for r in result]
+            return [{'to': r['to_pattern'], 'probability': r['probability'], 
+                     'avg_duration': r['avg_duration'], 'count': r['count']} for r in result]
 
     def _handle_record_transition(self, payload: Dict) -> Dict:
         """Enregistre une transition entre patterns"""
-        from_pattern = payload['from']
-        to_pattern = payload['to']
+        from_pattern = payload.get('from') or payload.get('from_pattern')
+        to_pattern = payload.get('to') or payload.get('to_pattern')
         duration_s = payload.get('duration_s', 0)
         trigger = payload.get('trigger', '')
 
+        if not from_pattern or not to_pattern:
+            return {'error': 'from_pattern and to_pattern are required'}
+
         with self.driver.session() as session:
             result = session.run("""
-                MATCH (p1:Pattern {name: $from})
-                MATCH (p2:Pattern {name: $to})
+                MERGE (p1:Pattern {name: $from})
+                MERGE (p2:Pattern {name: $to})
                 MERGE (p1)-[t:TRANSITION_TO]->(p2)
                 ON CREATE SET 
                     t.count = 1,
@@ -1076,7 +1135,7 @@ class Neo4jService:
         emotional_states = payload.get('emotional_states', {})
         if sentence_id and not emotional_states:
             emotional_states = {str(sentence_id): emotions}
-        emotional_states_str = {str(k): v for k, v in emotional_states.items()}
+        emotional_states_json = serialize_emotional_states(emotional_states)
 
         mots, relations = self.relation_extractor.extract(text, sentence_id=sentence_id, emotions=emotions)
         
@@ -1089,26 +1148,23 @@ class Neo4jService:
                     w1 = rel_info['source'] if isinstance(rel_info, dict) else rel_info[0]
                     rel_type = rel_info['relation'] if isinstance(rel_info, dict) else rel_info[1]
                     w2 = rel_info['target'] if isinstance(rel_info, dict) else rel_info[2]
-                    rel_emotional_states = rel_info.get('emotional_states', emotional_states_str) if isinstance(rel_info, dict) else emotional_states_str
                     
                     session.run("""
                         MERGE (c1:Concept {name: $w1})
-                        ON CREATE SET c1.emotional_states = $emotional_states
-                        ON MATCH SET c1.emotional_states = c1.emotional_states + $emotional_states
+                        ON CREATE SET c1.emotional_states = $emotional_states, c1.created_at = datetime()
                         MERGE (c2:Concept {name: $w2})
-                        ON CREATE SET c2.emotional_states = $emotional_states
-                        ON MATCH SET c2.emotional_states = c2.emotional_states + $emotional_states
+                        ON CREATE SET c2.emotional_states = $emotional_states, c2.created_at = datetime()
                         MERGE (c1)-[r:SEMANTIQUE {type: $rel_type}]->(c2)
                         ON CREATE SET r.count = 1, r.emotional_states = $emotional_states
-                        ON MATCH SET r.count = r.count + 1, r.emotional_states = r.emotional_states + $emotional_states
-                    """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, emotional_states=rel_emotional_states)
+                        ON MATCH SET r.count = r.count + 1
+                    """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, emotional_states=emotional_states_json)
 
         return {
             'keywords': words,
             'relations': relations,
             'stored': store,
             'sentence_id': sentence_id,
-            'emotional_states': emotional_states_str
+            'emotional_states': emotional_states
         }
 
     def _handle_create_concept(self, payload: Dict) -> Dict:
@@ -1122,22 +1178,21 @@ class Neo4jService:
         emotional_states = payload.get('emotional_states', {})
         if sentence_id and not emotional_states:
             emotional_states = {str(sentence_id): emotions}
-        emotional_states_str = {str(k): v for k, v in emotional_states.items()}
+        emotional_states_json = serialize_emotional_states(emotional_states)
 
         with self.driver.session() as session:
             result = session.run("""
                 MERGE (c:Concept {name: $name})
                 ON CREATE SET c.created_at = datetime(), c.emotional_states = $emotional_states
-                ON MATCH SET c.emotional_states = c.emotional_states + $emotional_states
                 SET c += $attrs
                 RETURN c.name AS name, c.emotional_states AS emotional_states
-            """, name=name, attrs=attributes, emotional_states=emotional_states_str)
+            """, name=name, attrs=attributes, emotional_states=emotional_states_json)
 
             record = result.single()
-            es = record['emotional_states'] or {}
+            es = deserialize_emotional_states(record['emotional_states'])
             return {
                 'name': record['name'], 
-                'emotional_states': dict(es),
+                'emotional_states': es,
                 'sentence_ids': list(es.keys())
             }
 
@@ -1152,8 +1207,7 @@ class Neo4jService:
             result = session.run(f"""
                 MATCH (m:Memory {{id: $mem_id}})
                 MERGE (c:Concept {{name: $concept}})
-                ON CREATE SET c.emotional_states = COALESCE(m.emotional_states, {{}})
-                ON MATCH SET c.emotional_states = c.emotional_states + COALESCE(m.emotional_states, {{}})
+                ON CREATE SET c.emotional_states = m.emotional_states, c.created_at = datetime()
                 MERGE (m)-[r:{relation_type}]->(c)
                 SET r += $props
                 RETURN m.id AS memory, c.name AS concept, 
@@ -1162,16 +1216,18 @@ class Neo4jService:
             """, mem_id=memory_id, concept=concept_name, props=properties)
 
             record = result.single()
-            mem_es = record['memory_emotional_states'] or {}
-            con_es = record['concept_emotional_states'] or {}
+            if not record:
+                return {'error': 'Memory not found'}
+            mem_es = deserialize_emotional_states(record['memory_emotional_states'])
+            con_es = deserialize_emotional_states(record['concept_emotional_states'])
             return {
                 'memory': record['memory'],
                 'concept': record['concept'],
                 'relation': relation_type,
                 'memory_sentence_ids': list(mem_es.keys()),
                 'concept_sentence_ids': list(con_es.keys()),
-                'memory_emotional_states': dict(mem_es),
-                'concept_emotional_states': dict(con_es)
+                'memory_emotional_states': mem_es,
+                'concept_emotional_states': con_es
             }
 
     def _handle_get_concept(self, payload: Dict) -> Optional[Dict]:
@@ -1188,7 +1244,7 @@ class Neo4jService:
             record = result.single()
             if record and record['c']:
                 c = record['c']
-                emotional_states = c.get('emotional_states', {})
+                emotional_states = deserialize_emotional_states(c.get('emotional_states', '{}'))
                 
                 # Analyser l'historique émotionnel
                 analysis = self._analyze_emotional_history(emotional_states)
@@ -1196,8 +1252,8 @@ class Neo4jService:
                 return {
                     'name': c['name'],
                     'memory_ids': c.get('memory_ids', []),
-                    'emotional_states': dict(emotional_states) if emotional_states else {},
-                    'sentence_ids': list(emotional_states.keys()) if emotional_states else [],
+                    'emotional_states': emotional_states,
+                    'sentence_ids': list(emotional_states.keys()),
                     'linked_memories': [m for m in record['linked_memories'] if m],
                     'trauma_associated': c.get('trauma_associated', False),
                     'created_at': str(c.get('created_at', '')),
@@ -1294,12 +1350,12 @@ class Neo4jService:
 
             concepts = []
             for record in result:
-                emotional_states = record['emotional_states'] or {}
+                emotional_states = deserialize_emotional_states(record['emotional_states'])
                 analysis = self._analyze_emotional_history(emotional_states)
                 concepts.append({
                     'name': record['name'],
                     'memory_ids': record['memory_ids'] or [],
-                    'emotional_states': dict(emotional_states),
+                    'emotional_states': emotional_states,
                     'sentence_ids': list(emotional_states.keys()),
                     'trauma_associated': record['trauma_associated'],
                     'emotional_analysis': analysis
@@ -1315,10 +1371,11 @@ class Neo4jService:
 
         with self.driver.session() as session:
             if sentence_id:
-                # Relations pour un sentence_id spécifique
+                # Relations pour un sentence_id spécifique (chercher dans JSON string)
+                search_key = f'"{sentence_id}":'
                 result = session.run("""
                     MATCH (c1:Concept)-[r:SEMANTIQUE]->(c2:Concept)
-                    WHERE $sent_id IN keys(r.emotional_states)
+                    WHERE r.emotional_states IS NOT NULL AND r.emotional_states CONTAINS $search_key
                     RETURN c1.name AS source, c1.memory_ids AS source_memory_ids, 
                            c1.emotional_states AS source_emotional_states,
                            r.type AS relation, r.memory_ids AS relation_memory_ids, 
@@ -1326,7 +1383,7 @@ class Neo4jService:
                            c2.name AS target, c2.memory_ids AS target_memory_ids, 
                            c2.emotional_states AS target_emotional_states
                     LIMIT $limit
-                """, sent_id=str(sentence_id), limit=limit)
+                """, search_key=search_key, limit=limit)
             elif memory_id:
                 # Relations pour une mémoire spécifique
                 result = session.run("""
@@ -1375,49 +1432,51 @@ class Neo4jService:
 
             relations = []
             for r in result:
-                src_es = r['source_emotional_states'] or {}
-                rel_es = r['relation_emotional_states'] or {}
-                tgt_es = r['target_emotional_states'] or {}
+                src_es = deserialize_emotional_states(r['source_emotional_states'])
+                rel_es = deserialize_emotional_states(r['relation_emotional_states'])
+                tgt_es = deserialize_emotional_states(r['target_emotional_states'])
                 relations.append({
                     'source': r['source'],
                     'source_memory_ids': r['source_memory_ids'] or [],
                     'source_sentence_ids': list(src_es.keys()),
-                    'source_emotional_states': dict(src_es),
+                    'source_emotional_states': src_es,
                     'relation': r['relation'],
                     'relation_memory_ids': r['relation_memory_ids'] or [],
                     'relation_sentence_ids': list(rel_es.keys()),
-                    'relation_emotional_states': dict(rel_es),
+                    'relation_emotional_states': rel_es,
                     'target': r['target'],
                     'target_memory_ids': r['target_memory_ids'] or [],
                     'target_sentence_ids': list(tgt_es.keys()),
-                    'target_emotional_states': dict(tgt_es)
+                    'target_emotional_states': tgt_es
                 })
             return relations
 
     def _handle_get_concepts_by_sentence(self, payload: Dict) -> List[Dict]:
         """Récupère tous les concepts d'une phrase spécifique avec leurs émotions"""
         sentence_id = payload['sentence_id']
+        # Pour chercher dans le JSON string, on utilise CONTAINS avec le pattern de clé
+        search_key = f'"{sentence_id}":'
 
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (c:Concept)
-                WHERE $sent_id IN keys(c.emotional_states)
+                WHERE c.emotional_states IS NOT NULL AND c.emotional_states CONTAINS $search_key
                 RETURN c.name AS name, c.memory_ids AS memory_ids, 
                        c.emotional_states AS emotional_states,
                        c.trauma_associated AS trauma_associated
                 ORDER BY c.name
-            """, sent_id=str(sentence_id))
+            """, search_key=search_key)
 
             concepts = []
             for r in result:
-                emotional_states = r['emotional_states'] or {}
+                emotional_states = deserialize_emotional_states(r['emotional_states'])
                 # Extraire les émotions de ce sentence_id spécifique
                 this_sentence_emotions = emotional_states.get(str(sentence_id), [])
                 concepts.append({
                     'name': r['name'],
                     'memory_ids': r['memory_ids'] or [],
                     'sentence_ids': list(emotional_states.keys()),
-                    'emotional_states': dict(emotional_states),
+                    'emotional_states': emotional_states,
                     'emotions_for_sentence': this_sentence_emotions,
                     'trauma_associated': r['trauma_associated']
                 })
@@ -1426,21 +1485,22 @@ class Neo4jService:
     def _handle_get_relations_by_sentence(self, payload: Dict) -> List[Dict]:
         """Récupère toutes les relations d'une phrase spécifique avec leurs émotions"""
         sentence_id = payload['sentence_id']
+        search_key = f'"{sentence_id}":'
 
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (c1:Concept)-[r:SEMANTIQUE]->(c2:Concept)
-                WHERE $sent_id IN keys(r.emotional_states)
+                WHERE r.emotional_states IS NOT NULL AND r.emotional_states CONTAINS $search_key
                 RETURN c1.name AS source, c1.emotional_states AS source_emotional_states,
                        r.type AS relation, r.emotional_states AS relation_emotional_states,
                        c2.name AS target, c2.emotional_states AS target_emotional_states
-            """, sent_id=str(sentence_id))
+            """, search_key=search_key)
 
             relations = []
             for r in result:
-                src_es = r['source_emotional_states'] or {}
-                rel_es = r['relation_emotional_states'] or {}
-                tgt_es = r['target_emotional_states'] or {}
+                src_es = deserialize_emotional_states(r['source_emotional_states'])
+                rel_es = deserialize_emotional_states(r['relation_emotional_states'])
+                tgt_es = deserialize_emotional_states(r['target_emotional_states'])
                 
                 relations.append({
                     'source': r['source'],
@@ -1548,7 +1608,7 @@ class Neo4jService:
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (m:Memory)
-                WHERE m.type = 'MCT' OR (m.type IS NULL AND NOT EXISTS(m.consolidated))
+                WHERE m.type = 'MCT' OR (m.type IS NULL AND m.consolidated IS NULL)
                 WITH m
                 RETURN 
                     'MCT' AS type,
@@ -1616,8 +1676,8 @@ class Neo4jService:
         with self.driver.session() as session:
             result = session.run("""
                 MATCH (m:Memory)
-                WHERE (m.type = 'MCT' OR NOT EXISTS(m.consolidated))
-                  AND m.consolidated IS NULL OR m.consolidated = false
+                WHERE (m.type = 'MCT' OR m.type IS NULL)
+                  AND (m.consolidated IS NULL OR m.consolidated = false)
                 WITH m,
                      CASE
                          WHEN m.trauma = true THEN 1.0
@@ -1650,7 +1710,7 @@ class Neo4jService:
             # Archiver les mémoires très faibles
             archive_result = session.run("""
                 MATCH (m:Memory)
-                WHERE (m.type = 'MCT' OR NOT EXISTS(m.type))
+                WHERE (m.type = 'MCT' OR m.type IS NULL)
                   AND m.weight < $archive_threshold
                   AND (m.trauma IS NULL OR m.trauma = false)
                 WITH m LIMIT 50
@@ -1665,7 +1725,7 @@ class Neo4jService:
             # Supprimer les mémoires anciennes et faibles
             delete_result = session.run("""
                 MATCH (m:Memory)
-                WHERE (m.type = 'MCT' OR NOT EXISTS(m.type))
+                WHERE (m.type = 'MCT' OR m.type IS NULL)
                   AND m.weight < $min_weight
                   AND m.created_at < datetime() - duration({hours: $max_age})
                   AND (m.trauma IS NULL OR m.trauma = false)
