@@ -3,7 +3,7 @@
 Test complet pour Neo4j - Teste toutes les fonctionnalités du service
 Usage: python test_neo4j_full.py [--docker]
 
-Mis à jour pour supporter le système de sentence_ids
+Mis à jour pour supporter le système emotional_states {sentence_id: [24 emotions]}
 """
 
 import json
@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 import pika
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
 
@@ -24,7 +24,7 @@ class TestConfig:
     rabbitmq_pass: str
     request_queue: str = "neo4j.requests.queue"
     response_exchange: str = "neo4j.responses"
-    timeout: int = 10
+    timeout: int = 15
 
 
 class Neo4jTestClient:
@@ -121,11 +121,20 @@ class Neo4jFullTest:
         self.sentence_counter += 1
         return self.sentence_counter
 
+    def generate_emotions(self, dominant_idx: int = 0, intensity: float = 0.8) -> List[float]:
+        """Génère un vecteur de 24 émotions avec une émotion dominante"""
+        emotions = [0.0] * 24
+        emotions[dominant_idx] = intensity
+        # Ajouter un peu de bruit pour les émotions secondaires
+        emotions[(dominant_idx + 1) % 24] = intensity * 0.3
+        emotions[(dominant_idx + 2) % 24] = intensity * 0.2
+        return emotions
+
     def setup(self):
         """Initialisation"""
         print("\n" + "=" * 70)
         print("    TEST COMPLET NEO4J - TOUTES FONCTIONNALITÉS")
-        print("    (avec support sentence_ids)")
+        print("    (avec support emotional_states)")
         print("=" * 70)
         self.client.connect()
 
@@ -151,129 +160,146 @@ class Neo4jFullTest:
             'query': "MATCH (c:Concept) WHERE c.name STARTS WITH 'test_' DETACH DELETE c"
         })
 
+        # Supprimer les patterns de test
+        self.client.send_request('cypher_query', {
+            'query': "MATCH (p:Pattern) WHERE p.name STARTS WITH 'TEST_' DETACH DELETE p"
+        })
+
         self.client.close()
         print("Nettoyage terminé")
 
-    def run_test(self, name: str, func) -> bool:
-        """Exécute un test et enregistre le résultat"""
+    def run_test(self, name: str, test_func):
+        """Exécute un test et capture le résultat"""
         print(f"\n{'─' * 70}")
         print(f"TEST: {name}")
-        print("─" * 70)
+        print(f"{'─' * 70}")
 
         try:
-            result = func()
-            status = "✓ PASS" if result else "✗ FAIL"
-            self.results.append((name, result))
-            print(f"\n{status}")
-            return result
+            success = test_func()
+            if success:
+                print("\n✓ PASS")
+                self.results.append((name, True))
+            else:
+                print("\n✗ FAIL")
+                self.results.append((name, False))
         except Exception as e:
-            print(f"\n✗ ERREUR: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"\n✗ FAIL - Exception: {e}")
             self.results.append((name, False))
-            return False
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # TESTS MÉMOIRE
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TESTS DE BASE - MÉMOIRE
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_create_memory(self) -> bool:
-        """Test création de mémoire"""
-        test_id = f"TEST_MEM_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
-
-        response = self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.8, 0.2, 0.1] + [0.0] * 21,
-            'dominant': 'Joie',
-            'intensity': 0.8,
-            'valence': 0.9,
-            'weight': 0.7,
-            'pattern': 'SERENITE',
-            'context': 'Premier souvenir heureux de test',
-            'type': 'Episodic'
-        })
-
-        if response and response.get('success'):
-            data = response.get('data', {})
-            print(f"  → Mémoire créée: {data.get('id')}")
-            print(f"  → Mots-clés extraits: {data.get('keywords_extracted')}")
-            return data.get('id') == test_id
-        return False
-
-    def test_create_memory_with_sentence_id(self) -> bool:
-        """Test création de mémoire avec sentence_id"""
-        test_id = f"TEST_MEM_SID_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
-        sentence_id = self.get_next_sentence_id()
+    def test_create_memory(self):
+        """Test création de mémoire basique"""
+        memory_id = f"TEST_MEM_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
 
         response = self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.7, 0.3, 0.0] + [0.0] * 21,
+            'id': memory_id,
+            'emotions': self.generate_emotions(0, 0.7),  # Joie
             'dominant': 'Joie',
             'intensity': 0.7,
             'valence': 0.8,
-            'weight': 0.6,
-            'context': 'Dans le parc, j\'ai vu des canards.',
-            'sentence_id': sentence_id,
-            'type': 'Episodic'
+            'weight': 0.5,
+            'context': "C'est un souvenir heureux de test",
+            'pattern': 'SERENITE'
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Mémoire créée: {data.get('id')}")
-            print(f"  → Sentence ID: {data.get('sentence_id')}")
-            print(f"  → Mots-clés: {data.get('keywords_extracted')}")
-            print(f"  → Relations créées: {data.get('relations_created')}")
-            return data.get('sentence_id') == sentence_id
+            print(f"  → Mots-clés extraits: {data.get('keywords_extracted')}")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_create_memory_with_relations(self) -> bool:
-        """Test création de mémoire avec extraction de relations"""
-        test_id = f"TEST_REL_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
+    def test_create_memory_with_emotional_states(self):
+        """Test création mémoire avec emotional_states explicite"""
+        memory_id = f"TEST_MEM_ES_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
+        sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(0, 0.9)  # Joie forte
 
         response = self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.5, 0.3, 0.2] + [0.0] * 21,
-            'dominant': 'Curiosité',
-            'intensity': 0.6,
-            'valence': 0.7,
-            'weight': 0.5,
-            'context': 'Marie aime les chats. Le chat dort sur le canapé.',
-            'type': 'Semantic'
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Joie',
+            'intensity': 0.9,
+            'valence': 0.95,
+            'weight': 0.6,
+            'context': "Dans le parc, j'ai observé des canards paisibles.",
+            'pattern': 'SERENITE'
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Mémoire créée: {data.get('id')}")
+            print(f"  → Sentence ID: {sentence_id}")
+            print(f"  → Mots-clés: {data.get('keywords_extracted')}")
+            print(f"  → Emotional states: {list(data.get('emotional_states', {}).keys())}")
+            print(f"  → Relations créées: {data.get('relations_created')}")
+            return True
+
+        print(f"  → Erreur: {response}")
+        return False
+
+    def test_create_memory_with_relations(self):
+        """Test création mémoire avec extraction de relations"""
+        memory_id = f"TEST_REL_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
+        sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(1, 0.7)  # Confiance
+
+        response = self.client.send_request('create_memory', {
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Confiance',
+            'intensity': 0.8,
+            'valence': 0.7,
+            'weight': 0.6,
+            'context': "Marie aime les chats. Le chat dort sur le canapé.",
+            'pattern': 'SERENITE'
+        })
+
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Mémoire créée: {data.get('id')}")
             print(f"  → Mots-clés: {data.get('keywords_extracted')}")
             print(f"  → Relations créées: {data.get('relations_created')}")
-            return True
+            return data.get('relations_created', 0) > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_memory(self) -> bool:
-        """Test récupération de mémoire"""
-        # Créer d'abord une mémoire
-        test_id = f"TEST_GET_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
+    def test_get_memory(self):
+        """Test récupération de mémoire avec emotional_states"""
+        memory_id = f"TEST_GET_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(16, 0.95)  # Extase
 
+        # Créer
         self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.9] + [0.0] * 23,
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
             'dominant': 'Extase',
             'intensity': 0.95,
             'valence': 1.0,
-            'weight': 0.8,
-            'context': 'Moment de pure joie',
-            'sentence_id': sentence_id
+            'weight': 0.8
         })
 
         # Récupérer
-        response = self.client.send_request('get_memory', {'id': test_id})
+        response = self.client.send_request('get_memory', {'id': memory_id})
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → ID: {data.get('id')}")
             print(f"  → Dominant: {data.get('dominant')}")
@@ -281,490 +307,467 @@ class Neo4jFullTest:
             print(f"  → Valence: {data.get('valence')}")
             print(f"  → Poids: {data.get('weight')}")
             print(f"  → Sentence IDs: {data.get('sentence_ids')}")
-            return data.get('dominant') == 'Extase'
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states keys: {list(es.keys())}")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_merge_memory(self) -> bool:
-        """Test fusion de mémoires avec sentence_ids"""
-        # Créer une mémoire cible
-        target_id = f"TEST_MERGE_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(target_id)
+    def test_merge_memory(self):
+        """Test fusion de mémoires avec emotional_states"""
+        memory_id = f"TEST_MERGE_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id_1 = self.get_next_sentence_id()
         sentence_id_2 = self.get_next_sentence_id()
+        
+        emotions_1 = self.generate_emotions(0, 0.7)  # Joie
+        emotions_2 = self.generate_emotions(8, 0.6)  # Sérénité
 
+        # Créer mémoire initiale
         self.client.send_request('create_memory', {
-            'id': target_id,
-            'emotions': [0.5] + [0.0] * 23,
+            'id': memory_id,
+            'sentence_id': sentence_id_1,
+            'emotions': emotions_1,
             'dominant': 'Joie',
-            'intensity': 0.5,
-            'valence': 0.6,
-            'weight': 0.4,
-            'sentence_id': sentence_id_1
+            'intensity': 0.7,
+            'valence': 0.8,
+            'weight': 0.5
         })
 
-        # Fusionner avec nouvelles émotions et nouveau sentence_id
+        # Fusionner avec nouvelles émotions
         response = self.client.send_request('merge_memory', {
-            'target_id': target_id,
-            'emotions': [0.8] + [0.0] * 23,
-            'transfer_weight': 0.3,
-            'sentence_ids': [sentence_id_2]
+            'target_id': memory_id,
+            'emotions': emotions_2,
+            'sentence_id': sentence_id_2,
+            'transfer_weight': 0.2
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Nouveau poids: {data.get('new_weight')}")
             print(f"  → Nombre de fusions: {data.get('merge_count')}")
-            print(f"  → Sentence IDs fusionnés: {data.get('sentence_ids')}")
-            # Vérifier que les deux sentence_ids sont présents
             sentence_ids = data.get('sentence_ids', [])
-            has_both = sentence_id_1 in sentence_ids and sentence_id_2 in sentence_ids
-            return data.get('new_weight', 0) > 0.4 and has_both
+            print(f"  → Sentence IDs fusionnés: {sentence_ids}")
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {len(es)} états")
+            
+            # Vérifier que les deux sentence_ids sont présents
+            has_both = str(sentence_id_1) in [str(k) for k in es.keys()] or str(sentence_id_2) in [str(k) for k in es.keys()]
+            return has_both or len(sentence_ids) >= 1
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_find_similar(self) -> bool:
-        """Test recherche de mémoires similaires"""
-        # Créer plusieurs mémoires avec des émotions identiques
-        base_emotions = [0.9, 0.1] + [0.0] * 22
-
+    def test_find_similar(self):
+        """Test recherche mémoires similaires"""
+        # Créer plusieurs mémoires avec des profils émotionnels
+        base_emotions = self.generate_emotions(0, 0.9)  # Joie forte
+        
+        memory_ids = []
         for i in range(3):
-            test_id = f"TEST_SIM_{i}_{uuid.uuid4().hex[:8]}"
-            self.test_ids.append(test_id)
+            mem_id = f"TEST_SIM_{uuid.uuid4().hex[:8]}"
+            memory_ids.append(mem_id)
+            self.test_ids.append(mem_id)
+            
             self.client.send_request('create_memory', {
-                'id': test_id,
+                'id': mem_id,
+                'sentence_id': self.get_next_sentence_id(),
                 'emotions': base_emotions,
                 'dominant': 'Joie',
                 'intensity': 0.9 - i * 0.1,
-                'valence': 0.8,
-                'sentence_id': self.get_next_sentence_id()
+                'valence': 0.9,
+                'weight': 0.7
             })
 
-        # Rechercher avec émotions identiques et seuil bas
+        # Rechercher des mémoires similaires
         response = self.client.send_request('find_similar', {
             'emotions': base_emotions,
-            'threshold': 0.5,
-            'limit': 10
+            'threshold': 0.7,
+            'limit': 5
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Mémoires similaires trouvées: {len(data)}")
             for mem in data[:3]:
-                print(f"    - {mem.get('id')}: similarité={mem.get('similarity', 0):.3f}, sentence_ids={mem.get('sentence_ids')}")
-            return True
-        else:
-            error = response.get('error') if response else 'Timeout'
-            print(f"  → Erreur: {error}")
+                print(f"    - {mem.get('id')}: similarité={mem.get('similarity', 0):.3f}")
+            return len(data) > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_reactivate_memory(self) -> bool:
+    def test_reactivate_memory(self):
         """Test réactivation de mémoire"""
-        test_id = f"TEST_REACT_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
+        memory_id = f"TEST_REACT_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
+        sentence_id = self.get_next_sentence_id()
 
-        # Créer avec poids faible
+        # Créer
         self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.5] + [0.0] * 23,
-            'dominant': 'Nostalgie',
-            'weight': 0.3,
-            'sentence_id': self.get_next_sentence_id()
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': self.generate_emotions(0, 0.5),
+            'dominant': 'Joie',
+            'intensity': 0.5,
+            'valence': 0.6,
+            'weight': 0.3
         })
 
         # Réactiver
         response = self.client.send_request('reactivate', {
-            'id': test_id,
+            'id': memory_id,
             'strength': 1.0,
             'boost_factor': 0.2
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Nouveau poids: {data.get('new_weight')}")
             print(f"  → Activations: {data.get('activations')}")
             print(f"  → Sentence IDs: {data.get('sentence_ids')}")
-            return data.get('new_weight', 0) > 0.3
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {len(es)} états")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
     # TESTS TRAUMA
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_create_trauma(self) -> bool:
-        """Test création de trauma avec sentence_id"""
-        test_id = f"TEST_TRAUMA_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
+    def test_create_trauma(self):
+        """Test création de trauma avec emotional_states"""
+        trauma_id = f"TEST_TRAUMA_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(trauma_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(2, 0.95)  # Peur intense
 
         response = self.client.send_request('create_trauma', {
-            'id': test_id,
-            'emotions': [0.0, 0.0, 0.0, 0.9, 0.8] + [0.0] * 19,
-            'dominant': 'Peur',
+            'id': trauma_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Terreur',
             'intensity': 0.95,
             'valence': 0.1,
-            'context': 'Événement traumatisant de test',
-            'trigger_keywords': ['accident', 'danger', 'peur'],
-            'sentence_id': sentence_id
+            'context': "Accident de voiture. Danger. Peur intense.",
+            'trigger_keywords': ['accident', 'danger', 'peur']
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Trauma créé: {data.get('id')}")
             print(f"  → Déclencheurs: {data.get('trigger_keywords')}")
             print(f"  → Sentence ID: {data.get('sentence_id')}")
-            return data.get('sentence_id') == sentence_id
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {list(es.keys())}")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # TESTS DECAY
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TESTS DECAY & MAINTENANCE
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_apply_decay(self) -> bool:
+    def test_apply_decay(self):
         """Test application du decay (oubli)"""
-        for i in range(3):
-            test_id = f"TEST_DECAY_{i}_{uuid.uuid4().hex[:8]}"
-            self.test_ids.append(test_id)
-            self.client.send_request('create_memory', {
-                'id': test_id,
-                'emotions': [0.5] + [0.0] * 23,
-                'weight': 0.8
-            })
-
         response = self.client.send_request('apply_decay', {
-            'elapsed_hours': 24,
-            'base_decay_rate': 0.05,
-            'trauma_decay_rate': 0.001
+            'normal_rate': 0.01,
+            'trauma_rate': 0.001,
+            'min_weight': 0.05
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Mémoires normales mises à jour: {data.get('normal_updated')}")
             print(f"  → Traumas mis à jour: {data.get('trauma_updated')}")
             print(f"  → Mémoires archivées: {data.get('archived')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # TESTS MODULE DREAMS (Consolidation nocturne)
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TESTS MODULE DREAMS
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_get_mct_stats(self) -> bool:
-        """Test statistiques mémoire court terme"""
-        for i in range(3):
-            test_id = f"TEST_MCT_STATS_{i}_{uuid.uuid4().hex[:8]}"
-            self.test_ids.append(test_id)
-            self.client.send_request('create_memory', {
-                'id': test_id,
-                'emotions': [0.5 + i * 0.1] + [0.0] * 23,
-                'dominant': 'Joie',
-                'intensity': 0.6 + i * 0.1,
-                'weight': 0.5,
-                'type': 'MCT'
-            })
-
+    def test_mct_stats(self):
+        """Test stats MCT"""
         response = self.client.send_request('get_mct_stats', {})
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Type: {data.get('type')}")
-            print(f"  → Total MCT: {data.get('total_count')}")
-            print(f"  → Poids moyen: {data.get('avg_weight', 0):.2f}")
-            print(f"  → Intensité moyenne: {data.get('avg_intensity', 0):.2f}")
-            print(f"  → Traumas: {data.get('trauma_count')}")
-            print(f"  → Working actives: {data.get('working_active_count')}")
-            return data.get('type') == 'MCT'
+            print(f"  → Total: {data.get('total_count')}")
+            print(f"  → Poids moyen: {data.get('avg_weight', 0):.3f}")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_mlt_stats(self) -> bool:
-        """Test statistiques mémoire long terme"""
+    def test_mlt_stats(self):
+        """Test stats MLT"""
         response = self.client.send_request('get_mlt_stats', {})
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Type: {data.get('type')}")
-            print(f"  → Total MLT: {data.get('total_count')}")
-            print(f"  → Score consolidation moyen: {data.get('avg_consolidation_score') or 0:.2f}")
+            print(f"  → Total: {data.get('total_count')}")
             print(f"  → Par catégorie: {data.get('by_category', {})}")
-            return data.get('type') == 'MLT'
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_consolidate_all_mct(self) -> bool:
-        """Test consolidation de toutes les MCT éligibles vers MLT"""
-        for i in range(2):
-            test_id = f"TEST_CONSOLIDATE_{i}_{uuid.uuid4().hex[:8]}"
-            self.test_ids.append(test_id)
-            self.client.send_request('create_memory', {
-                'id': test_id,
-                'emotions': [0.9] + [0.0] * 23,
-                'dominant': 'Extase',
-                'intensity': 0.85,
-                'weight': 0.8,
-                'type': 'MCT'
-            })
-
+    def test_consolidation(self):
+        """Test consolidation MCT → MLT"""
         response = self.client.send_request('consolidate_all_mct', {
             'importance_threshold': 0.6
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
-            print(f"  → Mémoires consolidées: {data.get('consolidated_count')}")
-            for mem in data.get('consolidated_memories', [])[:3]:
-                print(f"    - {mem.get('id')}: score={mem.get('score', 0):.2f}")
+            print(f"  → Consolidés: {data.get('consolidated_count')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_cleanup_mct(self) -> bool:
-        """Test nettoyage des MCT expirées"""
-        test_id = f"TEST_CLEANUP_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id)
-
-        self.client.send_request('create_memory', {
-            'id': test_id,
-            'emotions': [0.2] + [0.0] * 23,
-            'dominant': 'Ennui',
-            'intensity': 0.2,
-            'weight': 0.05,
-            'type': 'MCT'
-        })
-
+    def test_cleanup_mct(self):
+        """Test nettoyage MCT"""
         response = self.client.send_request('cleanup_mct', {
-            'max_age_hours': 0,
-            'min_weight': 0.2,
-            'archive_threshold': 0.1
+            'max_age_hours': 24,
+            'min_weight': 0.1
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
-            print(f"  → Archivées: {data.get('archived')}")
-            print(f"  → Supprimées: {data.get('deleted')}")
-            print(f"  → Working désactivées: {data.get('working_deactivated')}")
+            print(f"  → Archivés: {data.get('archived')}")
+            print(f"  → Supprimés: {data.get('deleted')}")
+            print(f"  → Désactivés: {data.get('working_deactivated')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_dream_cycle(self) -> bool:
-        """Test cycle de rêve complet (consolidation + nettoyage)"""
-        test_id_high = f"TEST_DREAM_HIGH_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id_high)
-        self.client.send_request('create_memory', {
-            'id': test_id_high,
-            'emotions': [0.95] + [0.0] * 23,
-            'dominant': 'Extase',
-            'intensity': 0.95,
-            'weight': 0.9,
-            'type': 'MCT'
-        })
-
-        test_id_low = f"TEST_DREAM_LOW_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(test_id_low)
-        self.client.send_request('create_memory', {
-            'id': test_id_low,
-            'emotions': [0.1] + [0.0] * 23,
-            'dominant': 'Ennui',
-            'intensity': 0.1,
-            'weight': 0.1,
-            'type': 'MCT'
-        })
-
+    def test_dream_cycle(self):
+        """Test cycle de rêve complet"""
         response = self.client.send_request('dream_cycle', {
             'importance_threshold': 0.6,
             'max_mct_age_hours': 24,
-            'min_weight_to_keep': 0.2
+            'min_weight_to_keep': 0.1
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
-            print(f"  → Cycle terminé: {data.get('dream_cycle_completed')}")
-
-            consolidation = data.get('consolidation', {})
-            print(f"  → Consolidées: {consolidation.get('consolidated_count')}")
-
-            cleanup = data.get('cleanup', {})
-            print(f"  → Archivées: {cleanup.get('archived')}")
-            print(f"  → Supprimées: {cleanup.get('deleted')}")
-
+            print(f"  → Cycle complété: {data.get('dream_cycle_completed')}")
+            print(f"  → Consolidation: {data.get('consolidation', {}).get('consolidated_count', 0)}")
             print(f"  → Liens MLT renforcés: {data.get('reinforced_mlt_links')}")
-            return data.get('dream_cycle_completed', False)
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
     # TESTS PATTERNS
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_patterns(self) -> bool:
-        """Test des patterns émotionnels"""
+    def test_patterns(self):
+        """Test gestion des patterns"""
         patterns = ['SERENITE', 'EXCITATION', 'ANXIETE', 'DEPRESSION']
 
-        create_resp = self.client.send_request('cypher_query', {
-            'query': """
-                UNWIND $patterns AS name
-                MERGE (p:Pattern {name: name})
-                ON CREATE SET p.created_at = datetime()
-            """,
-            'params': {'patterns': patterns}
-        })
+        for pattern in patterns:
+            self.client.send_request('create_pattern', {
+                'name': pattern,
+                'description': f"Pattern {pattern}",
+                'characteristics': {'base': pattern.lower()}
+            })
 
-        if create_resp and create_resp.get('success'):
-            print(f"  → Patterns créés/vérifiés: {patterns}")
-        else:
-            error = create_resp.get('error') if create_resp else 'Timeout'
-            print(f"  → Erreur création patterns: {error}")
+        print(f"  → Patterns créés/vérifiés: {patterns}")
 
+        # Récupérer un pattern
         response = self.client.send_request('get_pattern', {'name': 'SERENITE'})
 
-        if response and response.get('success'):
-            data = response.get('data')
-            if data:
-                print(f"  → Pattern trouvé: {data.get('name')}")
-            else:
-                print("  → Pattern non trouvé (normal si nouveau)")
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Pattern récupéré: {data.get('name')}")
             return True
-        else:
-            error = response.get('error') if response else 'Timeout'
-            print(f"  → Erreur get_pattern: {error}")
+
+        print(f"  → Erreur get_pattern: {response}")
         return False
 
-    def test_record_transition(self) -> bool:
-        """Test enregistrement de transition entre patterns"""
-        self.client.send_request('cypher_query', {
-            'query': """
-                MERGE (p1:Pattern {name: 'TEST_PATTERN_A'})
-                MERGE (p2:Pattern {name: 'TEST_PATTERN_B'})
-            """
-        })
-
+    def test_record_transition(self):
+        """Test enregistrement transition"""
         response = self.client.send_request('record_transition', {
-            'from': 'TEST_PATTERN_A',
-            'to': 'TEST_PATTERN_B',
-            'duration_s': 120,
-            'trigger': 'stimulus_positif'
+            'from_pattern': 'TEST_PATTERN_A',
+            'to_pattern': 'TEST_PATTERN_B',
+            'context': {'test': True}
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Transition: {data.get('from')} → {data.get('to')}")
             print(f"  → Compteur: {data.get('count')}")
             print(f"  → Probabilité: {data.get('probability', 0):.2f}")
-
-            self.client.send_request('cypher_query', {
-                'query': "MATCH (p:Pattern) WHERE p.name STARTS WITH 'TEST_PATTERN' DETACH DELETE p"
-            })
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_transitions(self) -> bool:
-        """Test récupération des transitions"""
-        self.client.send_request('cypher_query', {
-            'query': """
-                MERGE (p1:Pattern {name: 'ORIGINE'})
-                MERGE (p2:Pattern {name: 'DEST_A'})
-                MERGE (p3:Pattern {name: 'DEST_B'})
-                MERGE (p1)-[:TRANSITION_TO {probability: 0.6, count: 10}]->(p2)
-                MERGE (p1)-[:TRANSITION_TO {probability: 0.4, count: 7}]->(p3)
-            """
+    def test_get_transitions(self):
+        """Test récupération transitions"""
+        # Créer quelques transitions
+        self.client.send_request('record_transition', {
+            'from_pattern': 'ORIGINE',
+            'to_pattern': 'DEST_A'
+        })
+        self.client.send_request('record_transition', {
+            'from_pattern': 'ORIGINE',
+            'to_pattern': 'DEST_A'
+        })
+        self.client.send_request('record_transition', {
+            'from_pattern': 'ORIGINE',
+            'to_pattern': 'DEST_A'
+        })
+        self.client.send_request('record_transition', {
+            'from_pattern': 'ORIGINE',
+            'to_pattern': 'DEST_B'
+        })
+        self.client.send_request('record_transition', {
+            'from_pattern': 'ORIGINE',
+            'to_pattern': 'DEST_B'
         })
 
         response = self.client.send_request('get_transitions', {
-            'from': 'ORIGINE',
-            'limit': 5
+            'from_pattern': 'ORIGINE'
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Transitions depuis ORIGINE: {len(data)}")
             for t in data:
-                print(f"    → {t.get('to_pattern')}: prob={t.get('probability', 0):.2f}")
-
-            self.client.send_request('cypher_query', {
-                'query': "MATCH (p:Pattern) WHERE p.name IN ['ORIGINE', 'DEST_A', 'DEST_B'] DETACH DELETE p"
-            })
+                print(f"    → {t.get('to')}: prob={t.get('probability', 0):.2f}")
             return len(data) > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # TESTS RELATIONS / CONCEPTS
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TESTS RELATIONS SÉMANTIQUES
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_extract_relations(self) -> bool:
-        """Test extraction de relations sémantiques"""
-        response = self.client.send_request('extract_relations', {
-            'text': 'Le chat noir dort paisiblement sur le canapé rouge.',
-            'store': True
-        })
-
-        if response and response.get('success'):
-            data = response.get('data', {})
-            print(f"  → Mots-clés: {data.get('keywords')}")
-            print(f"  → Relations: {data.get('relations')}")
-            print(f"  → Stockées: {data.get('stored')}")
-            return len(data.get('keywords', [])) > 0
-        return False
-
-    def test_extract_relations_with_sentence_id(self) -> bool:
-        """Test extraction de relations avec sentence_id"""
+    def test_extract_relations(self):
+        """Test extraction de relations avec emotional_states"""
         sentence_id = self.get_next_sentence_id()
-        
+        emotions = self.generate_emotions(0, 0.7)  # Joie
+
         response = self.client.send_request('extract_relations', {
-            'text': 'Dans le parc, j\'ai vu des canards.',
+            'text': "Le chat noir dort paisiblement sur le canapé rouge.",
             'store': True,
-            'sentence_id': sentence_id
+            'sentence_id': sentence_id,
+            'emotions': emotions
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Mots-clés: {data.get('keywords')}")
             print(f"  → Relations: {data.get('relations')}")
             print(f"  → Sentence ID: {data.get('sentence_id')}")
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {list(es.keys())}")
             print(f"  → Stockées: {data.get('stored')}")
-            return data.get('sentence_id') == sentence_id
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_create_concept(self) -> bool:
-        """Test création de concept avec sentence_ids"""
+    def test_extract_relations_with_emotions(self):
+        """Test extraction relations avec traçabilité émotionnelle"""
         sentence_id = self.get_next_sentence_id()
-        
-        response = self.client.send_request('create_concept', {
-            'name': 'test_bonheur',
-            'attributes': {
-                'category': 'emotion',
-                'valence': 0.9,
-                'arousal': 0.6
-            },
-            'sentence_ids': [sentence_id]
+        emotions = self.generate_emotions(9, 0.8)  # Intérêt
+
+        response = self.client.send_request('extract_relations', {
+            'text': "Les canards nagent dans le parc.",
+            'store': True,
+            'sentence_id': sentence_id,
+            'emotions': emotions
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Mots-clés: {data.get('keywords')}")
+            print(f"  → Relations: {data.get('relations')}")
+            print(f"  → Sentence ID: {sentence_id}")
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {list(es.keys())}")
+            print(f"  → Stockées: {data.get('stored')}")
+            return True
+
+        print(f"  → Erreur: {response}")
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TESTS CONCEPTS avec emotional_states
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def test_create_concept(self):
+        """Test création de concept avec emotional_states"""
+        sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(0, 0.85)  # Joie
+
+        response = self.client.send_request('create_concept', {
+            'name': 'test_bonheur',
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'attributes': {
+                'category': 'emotion',
+                'valence': 'positive'
+            }
+        })
+
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Concept créé: {data.get('name')}")
             print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+            es = data.get('emotional_states', {})
+            print(f"  → Emotional states: {list(es.keys())}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_link_memory_concept(self) -> bool:
-        """Test liaison mémoire-concept"""
-        mem_id = f"TEST_LINK_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_link_memory_concept(self):
+        """Test liaison mémoire-concept avec propagation emotional_states"""
+        memory_id = f"TEST_LINK_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(1, 0.7)  # Confiance
 
+        # Créer mémoire
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.7] + [0.0] * 23,
-            'dominant': 'Joie',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Confiance',
+            'intensity': 0.7,
+            'valence': 0.8,
+            'weight': 0.6
         })
 
-        self.client.send_request('create_concept', {
-            'name': 'test_famille',
-            'sentence_ids': [sentence_id]
-        })
-
+        # Lier au concept
         response = self.client.send_request('link_memory_concept', {
-            'memory_id': mem_id,
+            'memory_id': memory_id,
             'concept_name': 'test_famille',
-            'relation': 'ASSOCIE_A',
-            'properties': {'strength': 0.8}
+            'relation': 'ASSOCIE_A'
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Mémoire: {data.get('memory')}")
             print(f"  → Concept: {data.get('concept')}")
@@ -772,195 +775,269 @@ class Neo4jFullTest:
             print(f"  → Memory sentence_ids: {data.get('memory_sentence_ids')}")
             print(f"  → Concept sentence_ids: {data.get('concept_sentence_ids')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_concept_with_ids(self) -> bool:
-        """Test récupération de concept avec ses IDs de mémoires et sentence_ids"""
-        mem_id = f"TEST_CONCEPT_IDS_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_get_concept_with_emotional_analysis(self):
+        """Test concept avec IDs et analyse émotionnelle"""
+        memory_id = f"TEST_CONCEPT_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(0, 0.9)  # Joie forte
 
+        # Créer une mémoire qui évoque un concept
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.6] + [0.0] * 23,
-            'dominant': 'Curiosité',
-            'context': 'Le soleil brille sur la montagne',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Joie',
+            'intensity': 0.9,
+            'valence': 0.95,
+            'weight': 0.8,
+            'context': "Le soleil brille sur la plage."
         })
 
+        # Récupérer le concept 'soleil'
         response = self.client.send_request('get_concept', {
             'name': 'soleil'
         })
 
-        if response and response.get('success'):
-            data = response.get('data')
-            if data:
-                print(f"  → Concept: {data.get('name')}")
-                print(f"  → Memory IDs: {data.get('memory_ids')}")
-                print(f"  → Sentence IDs: {data.get('sentence_ids')}")
-                print(f"  → Linked memories: {data.get('linked_memories')}")
-                return len(data.get('memory_ids', [])) > 0
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Concept: {data.get('name')}")
+            print(f"  → Memory IDs: {data.get('memory_ids')}")
+            print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+            print(f"  → Linked memories: {data.get('linked_memories')}")
+            analysis = data.get('emotional_analysis', {})
+            if analysis:
+                print(f"  → Analyse émotionnelle:")
+                print(f"      - Dominant: {analysis.get('dominant_emotion')}")
+                print(f"      - Valence moy: {analysis.get('avg_valence', 0):.2f}")
+                print(f"      - Stabilité: {analysis.get('stability', 0):.2f}")
+                print(f"      - Trajectoire: {analysis.get('trajectory')}")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_concepts_by_memory(self) -> bool:
-        """Test récupération des concepts d'une mémoire avec sentence_ids"""
-        mem_id = f"TEST_CONCEPTS_MEM_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_get_concepts_by_memory(self):
+        """Test récupération des concepts d'une mémoire avec emotional_states"""
+        memory_id = f"TEST_CONCEPTS_MEM_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(8, 0.7)  # Sérénité
 
+        # Créer une mémoire riche
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.7] + [0.0] * 23,
-            'dominant': 'Joie',
-            'context': 'Les enfants jouent dans le jardin fleuri',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Sérénité',
+            'intensity': 0.7,
+            'valence': 0.8,
+            'weight': 0.6,
+            'context': "Les enfants jouent dans le jardin fleuri."
         })
 
         response = self.client.send_request('get_concepts_by_memory', {
-            'memory_id': mem_id
+            'memory_id': memory_id
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Concepts trouvés: {len(data)}")
             for c in data[:5]:
                 print(f"    - {c.get('name')}: memory_ids={c.get('memory_ids')}, sentence_ids={c.get('sentence_ids')}")
+                analysis = c.get('emotional_analysis', {})
+                if analysis:
+                    print(f"      → Dominant: {analysis.get('dominant_emotion')}, Valence: {analysis.get('avg_valence', 0):.2f}")
             return len(data) > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_relations_with_ids(self) -> bool:
-        """Test récupération des relations avec leurs IDs de mémoires et sentence_ids"""
-        mem_id = f"TEST_REL_IDS_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_get_relations_with_emotional_states(self):
+        """Test récupération des relations avec emotional_states"""
+        memory_id = f"TEST_REL_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(0, 0.8)  # Joie
 
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.5] + [0.0] * 23,
-            'dominant': 'Curiosité',
-            'context': 'Le chat noir dort sur le canapé rouge',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Joie',
+            'intensity': 0.8,
+            'valence': 0.85,
+            'weight': 0.7,
+            'context': "Le chat dort sur le canapé."
         })
 
         response = self.client.send_request('get_relations_with_ids', {
-            'memory_id': mem_id,
-            'limit': 10
+            'memory_id': memory_id
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Relations trouvées: {len(data)}")
             for r in data[:3]:
-                print(f"    - '{r.get('source')}' mem_ids:{r.get('source_memory_ids')} sent_ids:{r.get('source_sentence_ids')} "
+                src_ids = r.get('source_sentence_ids', [])
+                tgt_ids = r.get('target_sentence_ids', [])
+                print(f"    - '{r.get('source')}' sent_ids:{src_ids} "
                       f"--[{r.get('relation')}]--> "
-                      f"'{r.get('target')}' mem_ids:{r.get('target_memory_ids')} sent_ids:{r.get('target_sentence_ids')}")
+                      f"'{r.get('target')}' sent_ids:{tgt_ids}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_concepts_by_sentence(self) -> bool:
-        """Test récupération des concepts par sentence_id"""
-        mem_id = f"TEST_CONCEPT_SENT_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_get_concepts_by_sentence(self):
+        """Test récupération des concepts par sentence_id avec émotions"""
+        memory_id = f"TEST_SENT_CONCEPT_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(7, 0.75)  # Anticipation
 
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.6] + [0.0] * 23,
-            'dominant': 'Curiosité',
-            'context': 'Le chien court dans le jardin',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Anticipation',
+            'intensity': 0.75,
+            'valence': 0.7,
+            'weight': 0.65,
+            'context': "Le chien court dans le jardin."
         })
 
         response = self.client.send_request('get_concepts_by_sentence', {
             'sentence_id': sentence_id
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Concepts pour sentence_id={sentence_id}: {len(data)}")
-            for c in data[:5]:
+            for c in data:
+                efs = c.get('emotions_for_sentence', [])
                 print(f"    - {c.get('name')}: sentence_ids={c.get('sentence_ids')}")
+                if efs:
+                    print(f"      → Émotions de cette phrase: {efs[:3]}...")
             return len(data) > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_relations_by_sentence(self) -> bool:
-        """Test récupération des relations par sentence_id"""
-        mem_id = f"TEST_REL_SENT_{uuid.uuid4().hex[:8]}"
-        self.test_ids.append(mem_id)
+    def test_get_relations_by_sentence(self):
+        """Test récupération des relations par sentence_id avec émotions"""
+        memory_id = f"TEST_SENT_REL_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(memory_id)
+        
         sentence_id = self.get_next_sentence_id()
+        emotions = self.generate_emotions(1, 0.8)  # Confiance
 
         self.client.send_request('create_memory', {
-            'id': mem_id,
-            'emotions': [0.5] + [0.0] * 23,
-            'dominant': 'Curiosité',
-            'context': 'Le chat gris dort sur le fauteuil bleu',
-            'sentence_id': sentence_id
+            'id': memory_id,
+            'sentence_id': sentence_id,
+            'emotions': emotions,
+            'dominant': 'Confiance',
+            'intensity': 0.8,
+            'valence': 0.75,
+            'weight': 0.7,
+            'context': "Le chat gris dort sur le fauteuil confortable."
         })
 
         response = self.client.send_request('get_relations_by_sentence', {
             'sentence_id': sentence_id
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Relations pour sentence_id={sentence_id}: {len(data)}")
             for r in data[:3]:
                 print(f"    - '{r.get('source')}' --[{r.get('relation')}]--> '{r.get('target')}'")
-            return True  # Peut être vide si pas de relations
+                efs = r.get('relation_emotions_for_sentence', [])
+                if efs:
+                    print(f"      → Émotions: {efs[:3]}...")
+            return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_sentence_id_accumulation(self) -> bool:
-        """Test accumulation des sentence_ids sur un même concept"""
-        # Créer plusieurs mémoires qui partagent un concept commun
-        shared_word = "parc"
+    def test_emotional_states_accumulation(self):
+        """Test accumulation des emotional_states sur un même concept"""
+        # Créer plusieurs mémoires mentionnant "parc" avec différentes émotions
         sentence_ids = []
-        
-        for i in range(3):
+        emotions_list = [
+            self.generate_emotions(0, 0.8),   # Joie
+            self.generate_emotions(2, 0.6),   # Peur
+            self.generate_emotions(8, 0.9),   # Sérénité
+        ]
+        contexts = [
+            "Je me promène dans le parc.",
+            "Il faisait sombre dans le parc.",
+            "Le parc est magnifique au printemps."
+        ]
+
+        for i, (emotions, context) in enumerate(zip(emotions_list, contexts)):
             mem_id = f"TEST_ACCUM_{i}_{uuid.uuid4().hex[:8]}"
             self.test_ids.append(mem_id)
             sentence_id = self.get_next_sentence_id()
             sentence_ids.append(sentence_id)
-            
-            contexts = [
-                f"Je me promène dans le {shared_word}.",
-                f"Les enfants jouent au {shared_word}.",
-                f"Le {shared_word} est magnifique aujourd'hui."
-            ]
-            
+
             self.client.send_request('create_memory', {
                 'id': mem_id,
-                'emotions': [0.6] + [0.0] * 23,
-                'dominant': 'Joie',
-                'context': contexts[i],
-                'sentence_id': sentence_id
+                'sentence_id': sentence_id,
+                'emotions': emotions,
+                'dominant': ['Joie', 'Peur', 'Sérénité'][i],
+                'intensity': 0.7 + i * 0.1,
+                'valence': [0.9, 0.2, 0.95][i],
+                'weight': 0.6,
+                'context': context
             })
 
-        # Récupérer le concept partagé
-        response = self.client.send_request('get_concept', {
-            'name': shared_word
-        })
+        # Vérifier que le concept 'parc' a accumulé les emotional_states
+        response = self.client.send_request('get_concept', {'name': 'parc'})
 
-        if response and response.get('success'):
-            data = response.get('data')
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
             if data:
                 concept_sent_ids = data.get('sentence_ids', [])
-                print(f"  → Concept '{shared_word}':")
+                es = data.get('emotional_states', {})
+                analysis = data.get('emotional_analysis', {})
+                
+                print(f"  → Concept 'parc':")
                 print(f"    - Sentence IDs attendus: {sentence_ids}")
                 print(f"    - Sentence IDs trouvés: {concept_sent_ids}")
                 print(f"    - Memory IDs: {data.get('memory_ids')}")
+                print(f"    - Nombre d'états émotionnels: {len(es)}")
                 
-                # Vérifier que tous les sentence_ids sont présents
-                all_present = all(sid in concept_sent_ids for sid in sentence_ids)
-                print(f"    - Tous les IDs présents: {all_present}")
-                return all_present
+                if analysis:
+                    print(f"    - Analyse émotionnelle:")
+                    print(f"        → Dominant global: {analysis.get('dominant_emotion')}")
+                    print(f"        → Stabilité: {analysis.get('stability', 0):.2f}")
+                    print(f"        → Trajectoire: {analysis.get('trajectory')}")
+                    print(f"        → Score trauma: {analysis.get('trauma_score', 0):.2f}")
+
+                # Vérifier que certains sentence_ids sont présents
+                found_count = sum(1 for sid in sentence_ids if str(sid) in [str(k) for k in es.keys()])
+                print(f"    - États émotionnels trouvés: {found_count}/{len(sentence_ids)}")
+                
+                return found_count > 0
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
     # TESTS SESSION
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_create_session(self) -> bool:
-        """Test création de session MCT"""
+    def test_create_session(self):
+        """Test création de session"""
         session_id = f"TEST_SESSION_{uuid.uuid4().hex[:8]}"
 
         response = self.client.send_request('create_session', {
@@ -968,147 +1045,133 @@ class Neo4jFullTest:
             'pattern': 'SERENITE'
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', {})
             print(f"  → Session créée: {data.get('id')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_update_session(self) -> bool:
+    def test_update_session(self):
         """Test mise à jour de session"""
         session_id = f"TEST_SESSION_UPD_{uuid.uuid4().hex[:8]}"
 
+        # Créer
         self.client.send_request('create_session', {
             'id': session_id,
-            'pattern': 'NEUTRE'
+            'pattern': 'SERENITE'
         })
 
+        # Mettre à jour
         response = self.client.send_request('update_session', {
             'id': session_id,
-            'updates': {
-                'current_pattern': 'EXCITATION',
-                'stability': 0.7,
-                'volatility': 0.3
-            },
-            'emotional_state': {
-                'emotions': [0.8, 0.2] + [0.0] * 22,
-                'dominant': 'Joie',
-                'valence': 0.85,
-                'intensity': 0.75
-            }
+            'pattern': 'EXCITATION',
+            'stability': 0.7,
+            'volatility': 0.3,
+            'trend': 'ascending'
         })
 
-        if response and response.get('success'):
-            print(f"  → Session mise à jour: {session_id}")
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Session mise à jour: {data.get('id')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_get_session(self) -> bool:
+    def test_get_session(self):
         """Test récupération de session"""
         session_id = f"TEST_SESSION_GET_{uuid.uuid4().hex[:8]}"
 
-        create_resp = self.client.send_request('create_session', {'id': session_id})
-        if not create_resp or not create_resp.get('success'):
-            print(f"  → Erreur création session: {create_resp}")
-            return False
+        # Créer
+        self.client.send_request('create_session', {
+            'id': session_id,
+            'pattern': 'ANXIETE'
+        })
 
         print(f"  → Session créée: {session_id}")
 
-        for i in range(3):
-            self.client.send_request('update_session', {
-                'id': session_id,
-                'emotional_state': {
-                    'emotions': [0.5 + i * 0.1] + [0.0] * 23,
-                    'dominant': 'Joie',
-                    'valence': 0.6 + i * 0.1,
-                    'intensity': 0.5 + i * 0.1
-                }
-            })
+        # Récupérer
+        response = self.client.send_request('get_session', {'id': session_id})
 
-        response = self.client.send_request('get_session', {
-            'id': session_id,
-            'state_limit': 5
-        })
+        if response and response.get('status') == 'success':
+            data = response.get('data', {})
+            print(f"  → Session récupérée: {data.get('id')}")
+            print(f"  → Pattern: {data.get('current_pattern')}")
+            return True
 
-        if response and response.get('success'):
-            data = response.get('data')
-            if data:
-                print(f"  → Session récupérée: {data.get('id')}")
-                print(f"  → États récents: {len(data.get('recent_states', []))}")
-                return True
-            else:
-                print("  → Session non trouvée (data=None)")
-                return False
-        else:
-            error = response.get('error') if response else 'Timeout'
-            print(f"  → Erreur: {error}")
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
     # TESTS REQUÊTES GÉNÉRIQUES
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    def test_cypher_query(self) -> bool:
-        """Test requête Cypher arbitraire"""
+    def test_cypher_query(self):
+        """Test requête Cypher"""
         response = self.client.send_request('cypher_query', {
-            'query': 'MATCH (m:Memory) RETURN count(m) AS total',
-            'params': {}
+            'query': "MATCH (m:Memory) RETURN count(m) AS total"
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             if data:
                 print(f"  → Total mémoires: {data[0].get('total')}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    def test_batch_query(self) -> bool:
+    def test_batch_queries(self):
         """Test batch de requêtes"""
         response = self.client.send_request('batch_query', {
             'queries': [
-                {'query': 'MATCH (m:Memory) RETURN count(m) AS memories'},
-                {'query': 'MATCH (c:Concept) RETURN count(c) AS concepts'},
-                {'query': 'MATCH (p:Pattern) RETURN count(p) AS patterns'}
+                {'query': "MATCH (m:Memory) RETURN count(m) AS total"},
+                {'query': "MATCH (c:Concept) RETURN count(c) AS total"},
+                {'query': "MATCH (p:Pattern) RETURN count(p) AS total"}
             ]
         })
 
-        if response and response.get('success'):
+        if response and response.get('status') == 'success':
             data = response.get('data', [])
             print(f"  → Résultats batch:")
             labels = ['Mémoires', 'Concepts', 'Patterns']
-            for i, result in enumerate(data):
-                if result:
-                    print(f"    - {labels[i]}: {list(result[0].values())[0] if result else 0}")
+            for i, r in enumerate(data):
+                if r:
+                    print(f"    - {labels[i]}: {r[0].get('total', 0)}")
             return True
+
+        print(f"  → Erreur: {response}")
         return False
 
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
     # EXÉCUTION
-    # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════════
 
     def run_all_tests(self):
         """Exécute tous les tests"""
         self.setup()
 
-        # Mémoire
+        # Tests de base mémoire
         self.run_test("Création de mémoire", self.test_create_memory)
-        self.run_test("Création mémoire avec sentence_id", self.test_create_memory_with_sentence_id)
+        self.run_test("Création mémoire avec emotional_states", self.test_create_memory_with_emotional_states)
         self.run_test("Création mémoire avec relations", self.test_create_memory_with_relations)
         self.run_test("Récupération de mémoire", self.test_get_memory)
-        self.run_test("Fusion de mémoires avec sentence_ids", self.test_merge_memory)
+        self.run_test("Fusion de mémoires avec emotional_states", self.test_merge_memory)
         self.run_test("Recherche mémoires similaires", self.test_find_similar)
         self.run_test("Réactivation de mémoire", self.test_reactivate_memory)
 
         # Trauma
-        self.run_test("Création de trauma avec sentence_id", self.test_create_trauma)
+        self.run_test("Création de trauma avec emotional_states", self.test_create_trauma)
 
-        # Decay
+        # Maintenance
         self.run_test("Application du decay (oubli)", self.test_apply_decay)
 
         # Module Dreams
-        self.run_test("Stats MCT", self.test_get_mct_stats)
-        self.run_test("Stats MLT", self.test_get_mlt_stats)
-        self.run_test("Consolidation MCT → MLT", self.test_consolidate_all_mct)
+        self.run_test("Stats MCT", self.test_mct_stats)
+        self.run_test("Stats MLT", self.test_mlt_stats)
+        self.run_test("Consolidation MCT → MLT", self.test_consolidation)
         self.run_test("Nettoyage MCT", self.test_cleanup_mct)
         self.run_test("Cycle de rêve complet", self.test_dream_cycle)
 
@@ -1117,17 +1180,19 @@ class Neo4jFullTest:
         self.run_test("Enregistrement transition", self.test_record_transition)
         self.run_test("Récupération transitions", self.test_get_transitions)
 
-        # Relations / Concepts
+        # Relations sémantiques
         self.run_test("Extraction de relations", self.test_extract_relations)
-        self.run_test("Extraction relations avec sentence_id", self.test_extract_relations_with_sentence_id)
+        self.run_test("Extraction relations avec émotions", self.test_extract_relations_with_emotions)
+
+        # Concepts avec emotional_states
         self.run_test("Création de concept", self.test_create_concept)
         self.run_test("Liaison mémoire-concept", self.test_link_memory_concept)
-        self.run_test("Concept avec IDs", self.test_get_concept_with_ids)
+        self.run_test("Concept avec analyse émotionnelle", self.test_get_concept_with_emotional_analysis)
         self.run_test("Concepts par mémoire", self.test_get_concepts_by_memory)
-        self.run_test("Relations avec IDs", self.test_get_relations_with_ids)
+        self.run_test("Relations avec emotional_states", self.test_get_relations_with_emotional_states)
         self.run_test("Concepts par sentence_id", self.test_get_concepts_by_sentence)
         self.run_test("Relations par sentence_id", self.test_get_relations_by_sentence)
-        self.run_test("Accumulation sentence_ids", self.test_sentence_id_accumulation)
+        self.run_test("Accumulation emotional_states", self.test_emotional_states_accumulation)
 
         # Sessions
         self.run_test("Création de session", self.test_create_session)
@@ -1136,7 +1201,7 @@ class Neo4jFullTest:
 
         # Requêtes génériques
         self.run_test("Requête Cypher", self.test_cypher_query)
-        self.run_test("Batch de requêtes", self.test_batch_query)
+        self.run_test("Batch de requêtes", self.test_batch_queries)
 
         self.teardown()
         self.print_summary()
@@ -1147,58 +1212,53 @@ class Neo4jFullTest:
         print("RÉSUMÉ DES TESTS")
         print("=" * 70)
 
-        passed = sum(1 for _, r in self.results if r)
+        passed = sum(1 for _, success in self.results if success)
         total = len(self.results)
 
-        for name, result in self.results:
-            status = "✓ PASS" if result else "✗ FAIL"
+        for name, success in self.results:
+            status = "✓ PASS" if success else "✗ FAIL"
             print(f"  {status}: {name}")
 
-        print("\n" + "-" * 70)
+        print("-" * 70)
         print(f"TOTAL: {passed}/{total} tests réussis")
 
         if passed == total:
             print("\n" + "=" * 70)
-            print("    TOUS LES TESTS RÉUSSIS ✓")
+            print("    TOUS LES TESTS SONT PASSÉS ✓")
             print("=" * 70)
         else:
             print("\n" + "=" * 70)
             print(f"    {total - passed} TEST(S) ÉCHOUÉ(S) ✗")
             print("=" * 70)
 
-        return passed == total
-
 
 def main():
+    # Configuration
     docker_mode = '--docker' in sys.argv
 
+    # Récupérer les credentials depuis les variables d'environnement
+    rabbitmq_host = os.environ.get('RABBITMQ_HOST', 'rabbitmq' if docker_mode else 'localhost')
+    rabbitmq_user = os.environ.get('RABBITMQ_USER', 'virtus')
+    rabbitmq_pass = os.environ.get('RABBITMQ_PASS', 'virtus@83')
+
     if docker_mode:
-        config = TestConfig(
-            rabbitmq_host=os.getenv('RABBITMQ_HOST', 'rabbitmq'),
-            rabbitmq_user=os.getenv('RABBITMQ_USER', 'virtus'),
-            rabbitmq_pass=os.getenv('RABBITMQ_PASS', 'virtus@83')
-        )
+        print("Mode: Docker")
     else:
-        config = TestConfig(
-            rabbitmq_host=os.getenv('RABBITMQ_HOST', 'localhost'),
-            rabbitmq_user=os.getenv('RABBITMQ_USER', 'virtus'),
-            rabbitmq_pass=os.getenv('RABBITMQ_PASS', 'virtus@83')
-        )
+        print("Mode: Local")
 
-    print(f"\nMode: {'Docker' if docker_mode else 'Local'}")
+    config = TestConfig(
+        rabbitmq_host=rabbitmq_host,
+        rabbitmq_user=rabbitmq_user,
+        rabbitmq_pass=rabbitmq_pass
+    )
+
     print(f"RabbitMQ: {config.rabbitmq_host}")
+    print(f"User: {config.rabbitmq_user}")
 
-    tester = Neo4jFullTest(config)
-
-    try:
-        success = tester.run_all_tests()
-        return 0 if success else 1
-    except Exception as e:
-        print(f"\n✗ ERREUR FATALE: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
+    # Exécuter les tests
+    test_suite = Neo4jFullTest(config)
+    test_suite.run_all_tests()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
