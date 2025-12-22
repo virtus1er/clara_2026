@@ -61,12 +61,6 @@ class RequestType(Enum):
     GET_AUTOBIOGRAPHIC = "get_autobiographic"  # Mémoire autobiographique
     LINK_ASSOCIATIVE = "link_associative"      # Lien associatif (odeurs, etc.)
 
-    # Patterns
-    GET_PATTERN = "get_pattern"
-    UPDATE_PATTERN = "update_pattern"
-    GET_TRANSITIONS = "get_transitions"
-    RECORD_TRANSITION = "record_transition"
-
     # Relations / Concepts
     EXTRACT_RELATIONS = "extract_relations"
     CREATE_CONCEPT = "create_concept"
@@ -193,11 +187,6 @@ class Neo4jService:
             RequestType.CREATE_PROCEDURAL.value: self._handle_create_procedural,
             RequestType.GET_AUTOBIOGRAPHIC.value: self._handle_get_autobiographic,
             RequestType.LINK_ASSOCIATIVE.value: self._handle_link_associative,
-            # Patterns
-            RequestType.GET_PATTERN.value: self._handle_get_pattern,
-            RequestType.UPDATE_PATTERN.value: self._handle_update_pattern,
-            RequestType.GET_TRANSITIONS.value: self._handle_get_transitions,
-            RequestType.RECORD_TRANSITION.value: self._handle_record_transition,
             # Relations / Concepts
             RequestType.EXTRACT_RELATIONS.value: self._handle_extract_relations,
             RequestType.CREATE_CONCEPT.value: self._handle_create_concept,
@@ -348,7 +337,6 @@ class Neo4jService:
         intensity = payload.get('intensity', 0.0)
         valence = payload.get('valence', 0.5)
         weight = payload.get('weight', 0.5)
-        pattern = payload.get('pattern', 'INCONNU')
         context = payload.get('context', '')
         keywords = payload.get('keywords', [])
         memory_type = payload.get('type', 'Episodic')
@@ -384,7 +372,6 @@ class Neo4jService:
                     intensity: $intensity,
                     valence: $valence,
                     weight: $weight,
-                    pattern_at_creation: $pattern,
                     context: $context,
                     keywords: $keywords,
                     created_at: datetime(),
@@ -400,7 +387,6 @@ class Neo4jService:
                                  intensity=intensity,
                                  valence=valence,
                                  weight=weight,
-                                 pattern=pattern,
                                  context=context,
                                  keywords=keywords
                                  )
@@ -414,7 +400,7 @@ class Neo4jService:
                 word_es_json = serialize_emotional_states(word_emotional_states)
                 
                 # Lire l'état actuel, fusionner, puis écrire
-                session.run("""
+                result = session.run("""
                     MERGE (c:Concept {name: $name})
                     ON CREATE SET 
                         c.created_at = datetime(), 
@@ -428,16 +414,22 @@ class Neo4jService:
                     WITH c
                     MATCH (m:Memory {id: $mem_id})
                     MERGE (m)-[:EVOQUE]->(c)
+                    RETURN c.emotional_states AS current_es
                 """, name=word.lower(), mem_id=created_id, emotional_states=word_es_json)
                 
-                # Mettre à jour emotional_states en fusionnant (on le fait après le MERGE)
-                session.run("""
-                    MATCH (c:Concept {name: $name})
-                    SET c.emotional_states = CASE 
-                        WHEN c.emotional_states IS NULL OR c.emotional_states = '{}' THEN $es
-                        ELSE c.emotional_states
-                    END
-                """, name=word.lower(), es=word_es_json)
+                # Fusionner les emotional_states côté Python
+                result_record = result.single()
+                if result_record:
+                    current_es = deserialize_emotional_states(result_record['current_es'])
+                    word_es = deserialize_emotional_states(word_es_json)
+                    # Fusionner les nouveaux états
+                    for k, v in word_es.items():
+                        current_es[str(k)] = v
+                    merged_es_json = serialize_emotional_states(current_es)
+                    session.run("""
+                        MATCH (c:Concept {name: $name})
+                        SET c.emotional_states = $es
+                    """, name=word.lower(), es=merged_es_json)
 
             # Créer les relations sémantiques avec emotional_states (JSON)
             for rel_info in relations:
@@ -480,13 +472,6 @@ class Neo4jService:
                             ELSE r.memory_ids + $mem_id
                         END
                 """, w1=w1.lower(), w2=w2.lower(), rel_type=rel_type, mem_id=created_id, emotional_states=rel_es_json)
-
-            # Lier au pattern
-            session.run("""
-                MATCH (m:Memory {id: $mem_id})
-                MATCH (p:Pattern {name: $pattern})
-                MERGE (p)-[:ACTIVATED_BY]->(m)
-            """, mem_id=created_id, pattern=pattern)
 
         return {
             'id': created_id,
@@ -664,7 +649,6 @@ class Neo4jService:
                     'intensity': m['intensity'],
                     'valence': m['valence'],
                     'weight': m['weight'],
-                    'pattern': m.get('pattern_at_creation'),
                     'context': m.get('context'),
                     'keywords': m.get('keywords', []),
                     'concepts': concepts,
@@ -679,30 +663,45 @@ class Neo4jService:
         emotions = payload['emotions']
         threshold = payload.get('threshold', 0.85)
         limit = payload.get('limit', 5)
+        
+        # Calculer l'intensité et la valence de la requête
+        query_intensity = max(emotions) if emotions else 0
+        positive_indices = [0, 1, 8, 9, 10, 16, 17]
+        negative_indices = [2, 4, 5, 6, 11, 13, 20, 21, 22]
+        pos = sum(emotions[i] for i in positive_indices if i < len(emotions))
+        neg = sum(emotions[i] for i in negative_indices if i < len(emotions))
+        total = pos + neg
+        query_valence = (pos - neg) / total if total > 0 else 0.5
 
         with self.driver.session() as session:
-            # Calcul de similarité cosinus en Cypher
+            # Recherche par similarité d'intensité et valence
             result = session.run("""
                 MATCH (m:Memory)
-                WHERE m.emotions IS NOT NULL
-                WITH m, $emotions AS qe
-                WITH m, qe,
-                     reduce(dot = 0.0, i IN range(0, 23) | 
-                            dot + m.emotions[i] * qe[i]) AS dot_product,
-                     sqrt(reduce(a = 0.0, i IN range(0, 23) | a + m.emotions[i]^2)) AS norm_m,
-                     sqrt(reduce(b = 0.0, i IN range(0, 23) | b + qe[i]^2)) AS norm_q
-                WITH m, 
-                     CASE WHEN norm_m * norm_q > 0 
-                          THEN dot_product / (norm_m * norm_q) 
-                          ELSE 0 END AS similarity
+                WHERE m.intensity IS NOT NULL AND m.valence IS NOT NULL
+                WITH m,
+                     1 - abs(m.intensity - $query_intensity) AS intensity_sim,
+                     1 - abs(m.valence - $query_valence) AS valence_sim
+                WITH m, (intensity_sim + valence_sim) / 2 AS similarity
                 WHERE similarity >= $threshold
                 RETURN m.id AS id, m.dominant AS dominant, m.weight AS weight, 
-                       similarity, m.trauma AS trauma, m.sentence_ids AS sentence_ids
+                       similarity, m.trauma AS trauma, m.emotional_states AS emotional_states
                 ORDER BY similarity DESC
                 LIMIT $limit
-            """, emotions=emotions, threshold=threshold, limit=limit)
+            """, query_intensity=query_intensity, query_valence=query_valence, 
+                threshold=threshold, limit=limit)
 
-            return [dict(r) for r in result]
+            results = []
+            for r in result:
+                es = deserialize_emotional_states(r['emotional_states'])
+                results.append({
+                    'id': r['id'],
+                    'dominant': r['dominant'],
+                    'weight': r['weight'],
+                    'similarity': r['similarity'],
+                    'trauma': r['trauma'],
+                    'sentence_ids': list(es.keys())
+                })
+            return results
 
     def _handle_apply_decay(self, payload: Dict) -> Dict:
         """Applique le decay à tous les souvenirs"""
@@ -1005,120 +1004,6 @@ class Neo4jService:
                 return dict(record)
 
         return {'error': 'Could not create semantic relation'}
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # HANDLERS PATTERNS
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    def _handle_get_pattern(self, payload: Dict) -> Optional[Dict]:
-        """Récupère un pattern par nom"""
-        pattern_name = payload['name']
-
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (p:Pattern {name: $name})
-                RETURN p
-            """, name=pattern_name)
-
-            record = result.single()
-            if record:
-                p = record['p']
-                return dict(p)
-
-        return None
-
-    def _handle_update_pattern(self, payload: Dict) -> Dict:
-        """Met à jour un pattern"""
-        pattern_name = payload['name']
-        updates = payload.get('updates', {})
-
-        # Construire la requête dynamiquement
-        set_clauses = []
-        params = {'name': pattern_name}
-
-        for key, value in updates.items():
-            set_clauses.append(f"p.{key} = ${key}")
-            params[key] = value
-
-        if not set_clauses:
-            return {'error': 'No updates provided'}
-
-        query = f"""
-            MATCH (p:Pattern {{name: $name}})
-            SET {', '.join(set_clauses)}
-            RETURN p.name AS name
-        """
-
-        with self.driver.session() as session:
-            result = session.run(query, **params)
-            record = result.single()
-            if record:
-                return {'updated': record['name']}
-
-        return {'error': 'Pattern not found'}
-
-    def _handle_get_transitions(self, payload: Dict) -> List[Dict]:
-        """Récupère les transitions depuis un pattern"""
-        from_pattern = payload.get('from') or payload.get('from_pattern')
-        limit = payload.get('limit', 10)
-
-        if not from_pattern:
-            return []
-
-        with self.driver.session() as session:
-            result = session.run("""
-                MATCH (p1:Pattern {name: $from})-[t:TRANSITION_TO]->(p2:Pattern)
-                RETURN p2.name AS to_pattern, t.probability AS probability,
-                       t.avg_duration_s AS avg_duration, t.count AS count
-                ORDER BY t.probability DESC
-                LIMIT $limit
-            """, **{'from': from_pattern}, limit=limit)
-
-            return [{'to': r['to_pattern'], 'probability': r['probability'], 
-                     'avg_duration': r['avg_duration'], 'count': r['count']} for r in result]
-
-    def _handle_record_transition(self, payload: Dict) -> Dict:
-        """Enregistre une transition entre patterns"""
-        from_pattern = payload.get('from') or payload.get('from_pattern')
-        to_pattern = payload.get('to') or payload.get('to_pattern')
-        duration_s = payload.get('duration_s', 0)
-        trigger = payload.get('trigger', '')
-
-        if not from_pattern or not to_pattern:
-            return {'error': 'from_pattern and to_pattern are required'}
-
-        with self.driver.session() as session:
-            result = session.run("""
-                MERGE (p1:Pattern {name: $from})
-                MERGE (p2:Pattern {name: $to})
-                MERGE (p1)-[t:TRANSITION_TO]->(p2)
-                ON CREATE SET 
-                    t.count = 1,
-                    t.probability = 0.1,
-                    t.avg_duration_s = $duration,
-                    t.triggers = [$trigger]
-                ON MATCH SET 
-                    t.count = t.count + 1,
-                    t.avg_duration_s = (t.avg_duration_s * (t.count - 1) + $duration) / t.count,
-                    t.triggers = CASE 
-                        WHEN $trigger IN t.triggers THEN t.triggers
-                        ELSE t.triggers + $trigger
-                    END
-                WITH p1, t
-                // Recalculer les probabilités
-                MATCH (p1)-[all_t:TRANSITION_TO]->()
-                WITH t, sum(all_t.count) AS total
-                SET t.probability = toFloat(t.count) / total
-                RETURN t.count AS count, t.probability AS probability
-            """, **{'from': from_pattern, 'to': to_pattern}, duration=duration_s, trigger=trigger)
-
-            record = result.single()
-            return {
-                'from': from_pattern,
-                'to': to_pattern,
-                'count': record['count'],
-                'probability': record['probability']
-            }
 
     # ═══════════════════════════════════════════════════════════════════════════
     # HANDLERS RELATIONS
@@ -1522,13 +1407,11 @@ class Neo4jService:
     def _handle_create_session(self, payload: Dict) -> Dict:
         """Crée une nouvelle session MCT"""
         session_id = payload.get('id', f"SESSION_{datetime.now().timestamp()}")
-        pattern = payload.get('pattern', 'INCONNU')
 
         with self.driver.session() as neo_session:
             result = neo_session.run("""
                 CREATE (s:Session:MCT {
                     id: $id,
-                    current_pattern: $pattern,
                     stability: 0.0,
                     volatility: 0.0,
                     trend: 'stable',
@@ -1537,7 +1420,7 @@ class Neo4jService:
                     state_count: 0
                 })
                 RETURN s.id AS id
-            """, id=session_id, pattern=pattern)
+            """, id=session_id)
 
             return {'id': result.single()['id']}
 
