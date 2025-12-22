@@ -5,19 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Options de compilation
-add_compile_options(-Wall -Wextra -Wpedantic)
-
-# Options
-option(REVES_WITH_RABBITMQ "Build with RabbitMQ support" OFF)
-option(REVES_BUILD_EXAMPLES "Build examples" ON)
-option(REVES_BUILD_TESTS "Build tests" ON)
-
 # ═══════════════════════════════════════════════════════════════════════════
 # DÉPENDANCES
 # ═══════════════════════════════════════════════════════════════════════════
 
-# nlohmann/json (header-only)
+# nlohmann/json
 include(FetchContent)
 FetchContent_Declare(
     json
@@ -29,106 +21,36 @@ FetchContent_MakeAvailable(json)
 # Threads
 find_package(Threads REQUIRED)
 
-# RabbitMQ (optionnel)
-if(REVES_WITH_RABBITMQ)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SIMPLEAMQPCLIENT REQUIRED SimpleAmqpClient)
-    add_definitions(-DREVES_HAS_RABBITMQ)
-endif()
+# RabbitMQ
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(RABBITMQ REQUIRED librabbitmq)
+
+# SimpleAmqpClient
+find_library(SIMPLEAMQPCLIENT_LIB SimpleAmqpClient REQUIRED)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# LIBRARY - DreamEngine (core)
-# ═══════════════════════════════════════════════════════════════════════════
-
-add_library(dream_engine STATIC
-    DreamEngine.cpp
-)
-
-target_include_directories(dream_engine PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-target_link_libraries(dream_engine PUBLIC
-    Threads::Threads
-    nlohmann_json::nlohmann_json
-)
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LIBRARY - DreamIntegration (avec RabbitMQ)
-# ═══════════════════════════════════════════════════════════════════════════
-
-if(REVES_WITH_RABBITMQ)
-    add_library(dream_integration INTERFACE)
-    
-    target_include_directories(dream_integration INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${SIMPLEAMQPCLIENT_INCLUDE_DIRS}
-    )
-    
-    target_link_libraries(dream_integration INTERFACE
-        dream_engine
-        ${SIMPLEAMQPCLIENT_LIBRARIES}
-    )
-endif()
-
-# ═══════════════════════════════════════════════════════════════════════════
-# EXÉCUTABLE PRINCIPAL - target "reves"
+# EXÉCUTABLE
 # ═══════════════════════════════════════════════════════════════════════════
 
 add_executable(reves
-    examples/main.cpp
+    main.cpp
+    DreamEngine.cpp
 )
 
-target_link_libraries(reves PRIVATE dream_engine)
+target_include_directories(reves PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RABBITMQ_INCLUDE_DIRS}
+)
+
+target_link_libraries(reves PRIVATE
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+    ${SIMPLEAMQPCLIENT_LIB}
+    ${RABBITMQ_LIBRARIES}
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EXEMPLES
+# INSTALL
 # ═══════════════════════════════════════════════════════════════════════════
 
-if(REVES_BUILD_EXAMPLES)
-    # Exemple simple (sans RabbitMQ)
-    add_executable(dream_simple_example
-        examples/simple_example.cpp
-    )
-    target_link_libraries(dream_simple_example PRIVATE dream_engine)
-    
-    # Exemple d'intégration (nécessite RabbitMQ)
-    if(REVES_WITH_RABBITMQ)
-        add_executable(dream_integration_example
-            examples/integration_example.cpp
-        )
-        target_link_libraries(dream_integration_example PRIVATE 
-            dream_integration
-        )
-    endif()
-endif()
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TESTS
-# ═══════════════════════════════════════════════════════════════════════════
-
-if(REVES_BUILD_TESTS)
-    enable_testing()
-    
-    add_executable(dream_engine_test
-        tests/DreamEngineTest.cpp
-    )
-    target_link_libraries(dream_engine_test PRIVATE dream_engine)
-    add_test(NAME DreamEngineTest COMMAND dream_engine_test)
-endif()
-
-# ═══════════════════════════════════════════════════════════════════════════
-# INFO BUILD
-# ═══════════════════════════════════════════════════════════════════════════
-
-message(STATUS "")
-message(STATUS "═══════════════════════════════════════════════════════════")
-message(STATUS "  Module Rêves - Configuration")
-message(STATUS "═══════════════════════════════════════════════════════════")
-message(STATUS "  C++ Standard:      ${CMAKE_CXX_STANDARD}")
-message(STATUS "  Build Type:        ${CMAKE_BUILD_TYPE}")
-message(STATUS "  RabbitMQ Support:  ${REVES_WITH_RABBITMQ}")
-message(STATUS "  Build Examples:    ${REVES_BUILD_EXAMPLES}")
-message(STATUS "  Build Tests:       ${REVES_BUILD_TESTS}")
-message(STATUS "═══════════════════════════════════════════════════════════")
-message(STATUS "")
+install(TARGETS reves DESTINATION bin)
