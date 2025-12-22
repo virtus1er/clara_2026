@@ -206,7 +206,7 @@ class Neo4jFullTest:
             'pattern': 'SERENITE'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mémoire créée: {data.get('id')}")
             print(f"  → Mots-clés extraits: {data.get('keywords_extracted')}")
@@ -235,7 +235,7 @@ class Neo4jFullTest:
             'pattern': 'SERENITE'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mémoire créée: {data.get('id')}")
             print(f"  → Sentence ID: {sentence_id}")
@@ -267,7 +267,7 @@ class Neo4jFullTest:
             'pattern': 'SERENITE'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mémoire créée: {data.get('id')}")
             print(f"  → Mots-clés: {data.get('keywords_extracted')}")
@@ -299,7 +299,7 @@ class Neo4jFullTest:
         # Récupérer
         response = self.client.send_request('get_memory', {'id': memory_id})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → ID: {data.get('id')}")
             print(f"  → Dominant: {data.get('dominant')}")
@@ -344,7 +344,7 @@ class Neo4jFullTest:
             'transfer_weight': 0.2
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Nouveau poids: {data.get('new_weight')}")
             print(f"  → Nombre de fusions: {data.get('merge_count')}")
@@ -388,7 +388,7 @@ class Neo4jFullTest:
             'limit': 5
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Mémoires similaires trouvées: {len(data)}")
             for mem in data[:3]:
@@ -423,7 +423,7 @@ class Neo4jFullTest:
             'boost_factor': 0.2
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Nouveau poids: {data.get('new_weight')}")
             print(f"  → Activations: {data.get('activations')}")
@@ -458,7 +458,7 @@ class Neo4jFullTest:
             'trigger_keywords': ['accident', 'danger', 'peur']
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Trauma créé: {data.get('id')}")
             print(f"  → Déclencheurs: {data.get('trigger_keywords')}")
@@ -482,7 +482,7 @@ class Neo4jFullTest:
             'min_weight': 0.05
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mémoires normales mises à jour: {data.get('normal_updated')}")
             print(f"  → Traumas mis à jour: {data.get('trauma_updated')}")
@@ -500,7 +500,7 @@ class Neo4jFullTest:
         """Test stats MCT"""
         response = self.client.send_request('get_mct_stats', {})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Type: {data.get('type')}")
             print(f"  → Total: {data.get('total_count')}")
@@ -514,7 +514,7 @@ class Neo4jFullTest:
         """Test stats MLT"""
         response = self.client.send_request('get_mlt_stats', {})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Type: {data.get('type')}")
             print(f"  → Total: {data.get('total_count')}")
@@ -530,7 +530,7 @@ class Neo4jFullTest:
             'importance_threshold': 0.6
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Consolidés: {data.get('consolidated_count')}")
             return True
@@ -545,7 +545,7 @@ class Neo4jFullTest:
             'min_weight': 0.1
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Archivés: {data.get('archived')}")
             print(f"  → Supprimés: {data.get('deleted')}")
@@ -563,7 +563,7 @@ class Neo4jFullTest:
             'min_weight_to_keep': 0.1
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Cycle complété: {data.get('dream_cycle_completed')}")
             print(f"  → Consolidation: {data.get('consolidation', {}).get('consolidated_count', 0)}")
@@ -593,7 +593,7 @@ class Neo4jFullTest:
         # Récupérer un pattern
         response = self.client.send_request('get_pattern', {'name': 'SERENITE'})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Pattern récupéré: {data.get('name')}")
             return True
@@ -609,7 +609,7 @@ class Neo4jFullTest:
             'context': {'test': True}
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Transition: {data.get('from')} → {data.get('to')}")
             print(f"  → Compteur: {data.get('count')}")
@@ -647,7 +647,7 @@ class Neo4jFullTest:
             'from_pattern': 'ORIGINE'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Transitions depuis ORIGINE: {len(data)}")
             for t in data:
@@ -673,7 +673,7 @@ class Neo4jFullTest:
             'emotions': emotions
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mots-clés: {data.get('keywords')}")
             print(f"  → Relations: {data.get('relations')}")
@@ -698,7 +698,7 @@ class Neo4jFullTest:
             'emotions': emotions
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mots-clés: {data.get('keywords')}")
             print(f"  → Relations: {data.get('relations')}")
@@ -730,7 +730,7 @@ class Neo4jFullTest:
             }
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Concept créé: {data.get('name')}")
             print(f"  → Sentence IDs: {data.get('sentence_ids')}")
@@ -767,7 +767,7 @@ class Neo4jFullTest:
             'relation': 'ASSOCIE_A'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Mémoire: {data.get('memory')}")
             print(f"  → Concept: {data.get('concept')}")
@@ -804,7 +804,7 @@ class Neo4jFullTest:
             'name': 'soleil'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Concept: {data.get('name')}")
             print(f"  → Memory IDs: {data.get('memory_ids')}")
@@ -846,7 +846,7 @@ class Neo4jFullTest:
             'memory_id': memory_id
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Concepts trouvés: {len(data)}")
             for c in data[:5]:
@@ -882,7 +882,7 @@ class Neo4jFullTest:
             'memory_id': memory_id
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Relations trouvées: {len(data)}")
             for r in data[:3]:
@@ -919,7 +919,7 @@ class Neo4jFullTest:
             'sentence_id': sentence_id
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Concepts pour sentence_id={sentence_id}: {len(data)}")
             for c in data:
@@ -955,7 +955,7 @@ class Neo4jFullTest:
             'sentence_id': sentence_id
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Relations pour sentence_id={sentence_id}: {len(data)}")
             for r in data[:3]:
@@ -1003,7 +1003,7 @@ class Neo4jFullTest:
         # Vérifier que le concept 'parc' a accumulé les emotional_states
         response = self.client.send_request('get_concept', {'name': 'parc'})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             if data:
                 concept_sent_ids = data.get('sentence_ids', [])
@@ -1045,7 +1045,7 @@ class Neo4jFullTest:
             'pattern': 'SERENITE'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Session créée: {data.get('id')}")
             return True
@@ -1072,7 +1072,7 @@ class Neo4jFullTest:
             'trend': 'ascending'
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Session mise à jour: {data.get('id')}")
             return True
@@ -1095,7 +1095,7 @@ class Neo4jFullTest:
         # Récupérer
         response = self.client.send_request('get_session', {'id': session_id})
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', {})
             print(f"  → Session récupérée: {data.get('id')}")
             print(f"  → Pattern: {data.get('current_pattern')}")
@@ -1114,7 +1114,7 @@ class Neo4jFullTest:
             'query': "MATCH (m:Memory) RETURN count(m) AS total"
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             if data:
                 print(f"  → Total mémoires: {data[0].get('total')}")
@@ -1133,7 +1133,7 @@ class Neo4jFullTest:
             ]
         })
 
-        if response and response.get('status') == 'success':
+        if response and response.get('success'):
             data = response.get('data', [])
             print(f"  → Résultats batch:")
             labels = ['Mémoires', 'Concepts', 'Patterns']
