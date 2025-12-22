@@ -47,3 +47,11 @@ add_executable(dream_example
 )
 
 target_link_libraries(dream_example PRIVATE dream_engine)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# META TARGET - builds everything
+# ═══════════════════════════════════════════════════════════════════════════
+
+add_custom_target(reves
+    DEPENDS dream_engine dream_engine_test dream_example
+)
