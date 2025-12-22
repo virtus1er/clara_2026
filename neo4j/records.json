@@ -1,0 +1,763 @@
+﻿[
+  {
+    "n": {
+      "identity": 0,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.8,
+          0.2,
+          0.1,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Joie",
+        "keywords": [
+          "souvenir",
+          "heureux",
+          "test"
+        ],
+        "created_at": "2025-12-21T20:59:37.047000000Z",
+        "weight": 0.6688941253877989,
+        "valence": 0.9,
+        "type": "Episodic",
+        "intensity": 0.8,
+        "activation_count": 1,
+        "context": "Premier souvenir heureux de test",
+        "pattern_at_creation": "SERENITE",
+        "id": "TEST_MEM_a0509ed4",
+        "last_activated": "2025-12-21T20:59:37.047000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:0"
+    }
+  },
+  {
+    "n": {
+      "identity": 1,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "souvenir",
+        "created_at": "2025-12-21T20:59:37.381000000Z",
+        "memory_ids": [
+          "TEST_MEM_a0509ed4"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:1"
+    }
+  },
+  {
+    "n": {
+      "identity": 2,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "heureux",
+        "created_at": "2025-12-21T20:59:37.728000000Z",
+        "memory_ids": [
+          "TEST_MEM_a0509ed4"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:2"
+    }
+  },
+  {
+    "n": {
+      "identity": 3,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "test",
+        "created_at": "2025-12-21T20:59:37.741000000Z",
+        "memory_ids": [
+          "TEST_MEM_a0509ed4"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:3"
+    }
+  },
+  {
+    "n": {
+      "identity": 4,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.5,
+          0.3,
+          0.2,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Curiosité",
+        "keywords": [
+          "marie",
+          "aime",
+          "chats",
+          "chat",
+          "dort",
+          "canapé"
+        ],
+        "created_at": "2025-12-21T20:59:38.310000000Z",
+        "weight": 0.4777815181341421,
+        "valence": 0.7,
+        "type": "Semantic",
+        "intensity": 0.6,
+        "activation_count": 1,
+        "context": "Marie aime les chats. Le chat dort sur le canapé.",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_REL_271cd1fe",
+        "last_activated": "2025-12-21T20:59:38.310000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:4"
+    }
+  },
+  {
+    "n": {
+      "identity": 5,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "marie",
+        "created_at": "2025-12-21T20:59:38.319000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:5"
+    }
+  },
+  {
+    "n": {
+      "identity": 6,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "aime",
+        "created_at": "2025-12-21T20:59:38.329000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:6"
+    }
+  },
+  {
+    "n": {
+      "identity": 7,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "chats",
+        "created_at": "2025-12-21T20:59:38.341000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:7"
+    }
+  },
+  {
+    "n": {
+      "identity": 8,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "chat",
+        "created_at": "2025-12-21T20:59:38.354000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:8"
+    }
+  },
+  {
+    "n": {
+      "identity": 9,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "dort",
+        "created_at": "2025-12-21T20:59:38.365000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:9"
+    }
+  },
+  {
+    "n": {
+      "identity": 10,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "canapé",
+        "created_at": "2025-12-21T20:59:38.378000000Z",
+        "memory_ids": [
+          "TEST_REL_271cd1fe"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:10"
+    }
+  },
+  {
+    "n": {
+      "identity": 11,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.9,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Extase",
+        "keywords": [
+          "moment",
+          "pure",
+          "joie"
+        ],
+        "created_at": "2025-12-21T20:59:38.610000000Z",
+        "weight": 0.7644504290146275,
+        "valence": 1.0,
+        "type": "Episodic",
+        "intensity": 0.95,
+        "activation_count": 1,
+        "context": "Moment de pure joie",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_GET_dc5e99ca",
+        "last_activated": "2025-12-21T20:59:38.610000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:11"
+    }
+  },
+  {
+    "n": {
+      "identity": 12,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "moment",
+        "created_at": "2025-12-21T20:59:38.620000000Z",
+        "memory_ids": [
+          "TEST_GET_dc5e99ca"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:12"
+    }
+  },
+  {
+    "n": {
+      "identity": 13,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "pure",
+        "created_at": "2025-12-21T20:59:38.632000000Z",
+        "memory_ids": [
+          "TEST_GET_dc5e99ca"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:13"
+    }
+  },
+  {
+    "n": {
+      "identity": 14,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "joie",
+        "created_at": "2025-12-21T20:59:38.658000000Z",
+        "memory_ids": [
+          "TEST_GET_dc5e99ca"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:14"
+    }
+  },
+  {
+    "n": {
+      "identity": 15,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.6285714285714287,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Joie",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:38.922000000Z",
+        "weight": 0.6714326199763967,
+        "valence": 0.6,
+        "type": "Episodic",
+        "merge_count": 1,
+        "intensity": 0.5,
+        "activation_count": 2,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_MERGE_984bbada",
+        "last_activated": "2025-12-21T20:59:39.023000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:15"
+    }
+  },
+  {
+    "n": {
+      "identity": 16,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.9,
+          0.1,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Joie",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:39.327000000Z",
+        "weight": 0.4777815181341421,
+        "valence": 0.8,
+        "type": "Episodic",
+        "intensity": 0.9,
+        "activation_count": 1,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_SIM_0_9e38d174",
+        "last_activated": "2025-12-21T20:59:39.327000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:16"
+    }
+  },
+  {
+    "n": {
+      "identity": 17,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.9,
+          0.1,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Joie",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:39.435000000Z",
+        "weight": 0.4777815181341421,
+        "valence": 0.8,
+        "type": "Episodic",
+        "intensity": 0.8,
+        "activation_count": 1,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_SIM_1_61671337",
+        "last_activated": "2025-12-21T20:59:39.435000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:17"
+    }
+  },
+  {
+    "n": {
+      "identity": 18,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.9,
+          0.1,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Joie",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:39.536000000Z",
+        "weight": 0.4777815181341421,
+        "valence": 0.8,
+        "type": "Episodic",
+        "intensity": 0.7,
+        "activation_count": 1,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_SIM_2_06ef709f",
+        "last_activated": "2025-12-21T20:59:39.536000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:18"
+    }
+  },
+  {
+    "n": {
+      "identity": 19,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.5,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Nostalgie",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:39.849000000Z",
+        "weight": 0.42204336112802077,
+        "valence": 0.5,
+        "type": "Episodic",
+        "intensity": 0.0,
+        "activation_count": 2,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_REACT_652fa8fd",
+        "last_activated": "2025-12-21T20:59:39.951000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:19"
+    }
+  },
+  {
+    "n": {
+      "identity": 20,
+      "labels": [
+        "Memory",
+        "Trauma"
+      ],
+      "properties": {
+        "therapy_progress": 0.0,
+        "trauma": true,
+        "emotions": [
+          0.0,
+          0.0,
+          0.0,
+          0.9,
+          0.8,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Peur",
+        "trigger_keywords": [
+          "accident",
+          "danger",
+          "peur"
+        ],
+        "created_at": "2025-12-21T20:59:40.155000000Z",
+        "weight": 0.9493503248916937,
+        "valence": 0.1,
+        "avoidance_behaviors": [],
+        "reinforced": true,
+        "coping_strategies": [],
+        "intensity": 0.95,
+        "forget_rate": 0.001,
+        "activation_count": 1,
+        "context": "Événement traumatisant de test",
+        "id": "TEST_TRAUMA_97373a66",
+        "last_activated": "2025-12-21T20:59:40.155000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:20"
+    }
+  },
+  {
+    "n": {
+      "identity": 21,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "accident",
+        "trauma_associated": true,
+        "created_at": "2025-12-21T20:59:40.254000000Z",
+        "emotional_valence_personal": -0.5,
+        "memory_ids": [
+          "TEST_TRAUMA_97373a66"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:21"
+    }
+  },
+  {
+    "n": {
+      "identity": 22,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "name": "danger",
+        "trauma_associated": true,
+        "created_at": "2025-12-21T20:59:40.394000000Z",
+        "emotional_valence_personal": -0.5,
+        "memory_ids": [
+          "TEST_TRAUMA_97373a66"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:22"
+    }
+  },
+  {
+    "n": {
+      "identity": 23,
+      "labels": [
+        "Concept"
+      ],
+      "properties": {
+        "trauma_associated": true,
+        "name": "peur",
+        "created_at": "2025-12-21T20:59:40.404000000Z",
+        "emotional_valence_personal": -0.5,
+        "memory_ids": [
+          "TEST_TRAUMA_97373a66"
+        ]
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:23"
+    }
+  },
+  {
+    "n": {
+      "identity": 24,
+      "labels": [
+        "Memory"
+      ],
+      "properties": {
+        "emotions": [
+          0.5,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "dominant": "Neutre",
+        "keywords": [],
+        "created_at": "2025-12-21T20:59:40.459000000Z",
+        "weight": 0.7644504290146275,
+        "valence": 0.5,
+        "type": "Episodic",
+        "intensity": 0.0,
+        "activation_count": 1,
+        "context": "",
+        "pattern_at_creation": "INCONNU",
+        "id": "TEST_DECAY_0_2f69ab20",
+        "last_activated": "2025-12-21T20:59:40.459000000Z"
+      },
+      "elementId": "4:f7f60be4-861d-445c-97f1-73bc851bdbd4:24"
+    }
+  }
+]

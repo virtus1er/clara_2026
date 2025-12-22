@@ -1,0 +1,1204 @@
+#!/usr/bin/env python3
+"""
+Test complet pour Neo4j - Teste toutes les fonctionnalités du service
+Usage: python test_neo4j_full.py [--docker]
+
+Mis à jour pour supporter le système de sentence_ids
+"""
+
+import json
+import os
+import sys
+import time
+import uuid
+import pika
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class TestConfig:
+    """Configuration des tests"""
+    rabbitmq_host: str
+    rabbitmq_user: str
+    rabbitmq_pass: str
+    request_queue: str = "neo4j.requests.queue"
+    response_exchange: str = "neo4j.responses"
+    timeout: int = 10
+
+
+class Neo4jTestClient:
+    """Client de test pour le service Neo4j via RabbitMQ"""
+
+    def __init__(self, config: TestConfig):
+        self.config = config
+        self.connection = None
+        self.channel = None
+        self.callback_queue = None
+
+    def connect(self):
+        """Établit la connexion RabbitMQ"""
+        credentials = pika.PlainCredentials(
+            self.config.rabbitmq_user,
+            self.config.rabbitmq_pass
+        )
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(
+                host=self.config.rabbitmq_host,
+                credentials=credentials
+            )
+        )
+        self.channel = self.connection.channel()
+
+        # Déclarer les queues
+        self.channel.queue_declare(queue=self.config.request_queue, durable=True)
+        self.channel.exchange_declare(
+            exchange=self.config.response_exchange,
+            exchange_type='direct',
+            durable=True
+        )
+
+        # Queue de callback
+        result = self.channel.queue_declare(queue='', exclusive=True)
+        self.callback_queue = result.method.queue
+        self.channel.queue_bind(
+            exchange=self.config.response_exchange,
+            queue=self.callback_queue,
+            routing_key=self.callback_queue
+        )
+
+    def close(self):
+        """Ferme la connexion"""
+        if self.connection:
+            self.connection.close()
+
+    def send_request(self, request_type: str, payload: Dict) -> Optional[Dict]:
+        """Envoie une requête et attend la réponse"""
+        request_id = str(uuid.uuid4())
+
+        request = {
+            'request_id': request_id,
+            'request_type': request_type,
+            'payload': payload
+        }
+
+        self.channel.basic_publish(
+            exchange='',
+            routing_key=self.config.request_queue,
+            body=json.dumps(request),
+            properties=pika.BasicProperties(
+                reply_to=self.callback_queue,
+                correlation_id=request_id,
+                content_type='application/json'
+            )
+        )
+
+        # Attendre la réponse
+        start = time.time()
+        while time.time() - start < self.config.timeout:
+            method, props, body = self.channel.basic_get(
+                self.callback_queue, auto_ack=True
+            )
+            if body and props.correlation_id == request_id:
+                return json.loads(body.decode())
+            time.sleep(0.1)
+
+        return None
+
+
+class Neo4jFullTest:
+    """Tests complets du service Neo4j"""
+
+    def __init__(self, config: TestConfig):
+        self.config = config
+        self.client = Neo4jTestClient(config)
+        self.test_ids = []  # Pour le nettoyage
+        self.results = []
+        self.sentence_counter = 0  # Compteur global de sentence_ids pour les tests
+
+    def get_next_sentence_id(self) -> int:
+        """Retourne le prochain sentence_id pour les tests"""
+        self.sentence_counter += 1
+        return self.sentence_counter
+
+    def setup(self):
+        """Initialisation"""
+        print("\n" + "=" * 70)
+        print("    TEST COMPLET NEO4J - TOUTES FONCTIONNALITÉS")
+        print("    (avec support sentence_ids)")
+        print("=" * 70)
+        self.client.connect()
+
+    def teardown(self):
+        """Nettoyage"""
+        print("\n" + "-" * 70)
+        print("NETTOYAGE...")
+
+        # Supprimer tous les éléments de test
+        for test_id in self.test_ids:
+            self.client.send_request('delete_memory', {
+                'id': test_id,
+                'archive': False
+            })
+
+        # Supprimer les sessions de test
+        self.client.send_request('cypher_query', {
+            'query': "MATCH (s:Session) WHERE s.id STARTS WITH 'TEST_' DETACH DELETE s"
+        })
+
+        # Supprimer les concepts de test
+        self.client.send_request('cypher_query', {
+            'query': "MATCH (c:Concept) WHERE c.name STARTS WITH 'test_' DETACH DELETE c"
+        })
+
+        self.client.close()
+        print("Nettoyage terminé")
+
+    def run_test(self, name: str, func) -> bool:
+        """Exécute un test et enregistre le résultat"""
+        print(f"\n{'─' * 70}")
+        print(f"TEST: {name}")
+        print("─" * 70)
+
+        try:
+            result = func()
+            status = "✓ PASS" if result else "✗ FAIL"
+            self.results.append((name, result))
+            print(f"\n{status}")
+            return result
+        except Exception as e:
+            print(f"\n✗ ERREUR: {e}")
+            import traceback
+            traceback.print_exc()
+            self.results.append((name, False))
+            return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS MÉMOIRE
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_create_memory(self) -> bool:
+        """Test création de mémoire"""
+        test_id = f"TEST_MEM_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+
+        response = self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.8, 0.2, 0.1] + [0.0] * 21,
+            'dominant': 'Joie',
+            'intensity': 0.8,
+            'valence': 0.9,
+            'weight': 0.7,
+            'pattern': 'SERENITE',
+            'context': 'Premier souvenir heureux de test',
+            'type': 'Episodic'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoire créée: {data.get('id')}")
+            print(f"  → Mots-clés extraits: {data.get('keywords_extracted')}")
+            return data.get('id') == test_id
+        return False
+
+    def test_create_memory_with_sentence_id(self) -> bool:
+        """Test création de mémoire avec sentence_id"""
+        test_id = f"TEST_MEM_SID_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+        sentence_id = self.get_next_sentence_id()
+
+        response = self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.7, 0.3, 0.0] + [0.0] * 21,
+            'dominant': 'Joie',
+            'intensity': 0.7,
+            'valence': 0.8,
+            'weight': 0.6,
+            'context': 'Dans le parc, j\'ai vu des canards.',
+            'sentence_id': sentence_id,
+            'type': 'Episodic'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoire créée: {data.get('id')}")
+            print(f"  → Sentence ID: {data.get('sentence_id')}")
+            print(f"  → Mots-clés: {data.get('keywords_extracted')}")
+            print(f"  → Relations créées: {data.get('relations_created')}")
+            return data.get('sentence_id') == sentence_id
+        return False
+
+    def test_create_memory_with_relations(self) -> bool:
+        """Test création de mémoire avec extraction de relations"""
+        test_id = f"TEST_REL_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+
+        response = self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.5, 0.3, 0.2] + [0.0] * 21,
+            'dominant': 'Curiosité',
+            'intensity': 0.6,
+            'valence': 0.7,
+            'weight': 0.5,
+            'context': 'Marie aime les chats. Le chat dort sur le canapé.',
+            'type': 'Semantic'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoire créée: {data.get('id')}")
+            print(f"  → Mots-clés: {data.get('keywords_extracted')}")
+            print(f"  → Relations créées: {data.get('relations_created')}")
+            return True
+        return False
+
+    def test_get_memory(self) -> bool:
+        """Test récupération de mémoire"""
+        # Créer d'abord une mémoire
+        test_id = f"TEST_GET_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.9] + [0.0] * 23,
+            'dominant': 'Extase',
+            'intensity': 0.95,
+            'valence': 1.0,
+            'weight': 0.8,
+            'context': 'Moment de pure joie',
+            'sentence_id': sentence_id
+        })
+
+        # Récupérer
+        response = self.client.send_request('get_memory', {'id': test_id})
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → ID: {data.get('id')}")
+            print(f"  → Dominant: {data.get('dominant')}")
+            print(f"  → Intensité: {data.get('intensity')}")
+            print(f"  → Valence: {data.get('valence')}")
+            print(f"  → Poids: {data.get('weight')}")
+            print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+            return data.get('dominant') == 'Extase'
+        return False
+
+    def test_merge_memory(self) -> bool:
+        """Test fusion de mémoires avec sentence_ids"""
+        # Créer une mémoire cible
+        target_id = f"TEST_MERGE_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(target_id)
+        sentence_id_1 = self.get_next_sentence_id()
+        sentence_id_2 = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': target_id,
+            'emotions': [0.5] + [0.0] * 23,
+            'dominant': 'Joie',
+            'intensity': 0.5,
+            'valence': 0.6,
+            'weight': 0.4,
+            'sentence_id': sentence_id_1
+        })
+
+        # Fusionner avec nouvelles émotions et nouveau sentence_id
+        response = self.client.send_request('merge_memory', {
+            'target_id': target_id,
+            'emotions': [0.8] + [0.0] * 23,
+            'transfer_weight': 0.3,
+            'sentence_ids': [sentence_id_2]
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Nouveau poids: {data.get('new_weight')}")
+            print(f"  → Nombre de fusions: {data.get('merge_count')}")
+            print(f"  → Sentence IDs fusionnés: {data.get('sentence_ids')}")
+            # Vérifier que les deux sentence_ids sont présents
+            sentence_ids = data.get('sentence_ids', [])
+            has_both = sentence_id_1 in sentence_ids and sentence_id_2 in sentence_ids
+            return data.get('new_weight', 0) > 0.4 and has_both
+        return False
+
+    def test_find_similar(self) -> bool:
+        """Test recherche de mémoires similaires"""
+        # Créer plusieurs mémoires avec des émotions identiques
+        base_emotions = [0.9, 0.1] + [0.0] * 22
+
+        for i in range(3):
+            test_id = f"TEST_SIM_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': base_emotions,
+                'dominant': 'Joie',
+                'intensity': 0.9 - i * 0.1,
+                'valence': 0.8,
+                'sentence_id': self.get_next_sentence_id()
+            })
+
+        # Rechercher avec émotions identiques et seuil bas
+        response = self.client.send_request('find_similar', {
+            'emotions': base_emotions,
+            'threshold': 0.5,
+            'limit': 10
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Mémoires similaires trouvées: {len(data)}")
+            for mem in data[:3]:
+                print(f"    - {mem.get('id')}: similarité={mem.get('similarity', 0):.3f}, sentence_ids={mem.get('sentence_ids')}")
+            return True
+        else:
+            error = response.get('error') if response else 'Timeout'
+            print(f"  → Erreur: {error}")
+        return False
+
+    def test_reactivate_memory(self) -> bool:
+        """Test réactivation de mémoire"""
+        test_id = f"TEST_REACT_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+
+        # Créer avec poids faible
+        self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.5] + [0.0] * 23,
+            'dominant': 'Nostalgie',
+            'weight': 0.3,
+            'sentence_id': self.get_next_sentence_id()
+        })
+
+        # Réactiver
+        response = self.client.send_request('reactivate', {
+            'id': test_id,
+            'strength': 1.0,
+            'boost_factor': 0.2
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Nouveau poids: {data.get('new_weight')}")
+            print(f"  → Activations: {data.get('activations')}")
+            print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+            return data.get('new_weight', 0) > 0.3
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS TRAUMA
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_create_trauma(self) -> bool:
+        """Test création de trauma avec sentence_id"""
+        test_id = f"TEST_TRAUMA_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+        sentence_id = self.get_next_sentence_id()
+
+        response = self.client.send_request('create_trauma', {
+            'id': test_id,
+            'emotions': [0.0, 0.0, 0.0, 0.9, 0.8] + [0.0] * 19,
+            'dominant': 'Peur',
+            'intensity': 0.95,
+            'valence': 0.1,
+            'context': 'Événement traumatisant de test',
+            'trigger_keywords': ['accident', 'danger', 'peur'],
+            'sentence_id': sentence_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Trauma créé: {data.get('id')}")
+            print(f"  → Déclencheurs: {data.get('trigger_keywords')}")
+            print(f"  → Sentence ID: {data.get('sentence_id')}")
+            return data.get('sentence_id') == sentence_id
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS DECAY
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_apply_decay(self) -> bool:
+        """Test application du decay (oubli)"""
+        for i in range(3):
+            test_id = f"TEST_DECAY_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': [0.5] + [0.0] * 23,
+                'weight': 0.8
+            })
+
+        response = self.client.send_request('apply_decay', {
+            'elapsed_hours': 24,
+            'base_decay_rate': 0.05,
+            'trauma_decay_rate': 0.001
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoires normales mises à jour: {data.get('normal_updated')}")
+            print(f"  → Traumas mis à jour: {data.get('trauma_updated')}")
+            print(f"  → Mémoires archivées: {data.get('archived')}")
+            return True
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS MODULE DREAMS (Consolidation nocturne)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_get_mct_stats(self) -> bool:
+        """Test statistiques mémoire court terme"""
+        for i in range(3):
+            test_id = f"TEST_MCT_STATS_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': [0.5 + i * 0.1] + [0.0] * 23,
+                'dominant': 'Joie',
+                'intensity': 0.6 + i * 0.1,
+                'weight': 0.5,
+                'type': 'MCT'
+            })
+
+        response = self.client.send_request('get_mct_stats', {})
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Type: {data.get('type')}")
+            print(f"  → Total MCT: {data.get('total_count')}")
+            print(f"  → Poids moyen: {data.get('avg_weight', 0):.2f}")
+            print(f"  → Intensité moyenne: {data.get('avg_intensity', 0):.2f}")
+            print(f"  → Traumas: {data.get('trauma_count')}")
+            print(f"  → Working actives: {data.get('working_active_count')}")
+            return data.get('type') == 'MCT'
+        return False
+
+    def test_get_mlt_stats(self) -> bool:
+        """Test statistiques mémoire long terme"""
+        response = self.client.send_request('get_mlt_stats', {})
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Type: {data.get('type')}")
+            print(f"  → Total MLT: {data.get('total_count')}")
+            print(f"  → Score consolidation moyen: {data.get('avg_consolidation_score') or 0:.2f}")
+            print(f"  → Par catégorie: {data.get('by_category', {})}")
+            return data.get('type') == 'MLT'
+        return False
+
+    def test_consolidate_all_mct(self) -> bool:
+        """Test consolidation de toutes les MCT éligibles vers MLT"""
+        for i in range(2):
+            test_id = f"TEST_CONSOLIDATE_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(test_id)
+            self.client.send_request('create_memory', {
+                'id': test_id,
+                'emotions': [0.9] + [0.0] * 23,
+                'dominant': 'Extase',
+                'intensity': 0.85,
+                'weight': 0.8,
+                'type': 'MCT'
+            })
+
+        response = self.client.send_request('consolidate_all_mct', {
+            'importance_threshold': 0.6
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoires consolidées: {data.get('consolidated_count')}")
+            for mem in data.get('consolidated_memories', [])[:3]:
+                print(f"    - {mem.get('id')}: score={mem.get('score', 0):.2f}")
+            return True
+        return False
+
+    def test_cleanup_mct(self) -> bool:
+        """Test nettoyage des MCT expirées"""
+        test_id = f"TEST_CLEANUP_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id)
+
+        self.client.send_request('create_memory', {
+            'id': test_id,
+            'emotions': [0.2] + [0.0] * 23,
+            'dominant': 'Ennui',
+            'intensity': 0.2,
+            'weight': 0.05,
+            'type': 'MCT'
+        })
+
+        response = self.client.send_request('cleanup_mct', {
+            'max_age_hours': 0,
+            'min_weight': 0.2,
+            'archive_threshold': 0.1
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Archivées: {data.get('archived')}")
+            print(f"  → Supprimées: {data.get('deleted')}")
+            print(f"  → Working désactivées: {data.get('working_deactivated')}")
+            return True
+        return False
+
+    def test_dream_cycle(self) -> bool:
+        """Test cycle de rêve complet (consolidation + nettoyage)"""
+        test_id_high = f"TEST_DREAM_HIGH_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id_high)
+        self.client.send_request('create_memory', {
+            'id': test_id_high,
+            'emotions': [0.95] + [0.0] * 23,
+            'dominant': 'Extase',
+            'intensity': 0.95,
+            'weight': 0.9,
+            'type': 'MCT'
+        })
+
+        test_id_low = f"TEST_DREAM_LOW_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(test_id_low)
+        self.client.send_request('create_memory', {
+            'id': test_id_low,
+            'emotions': [0.1] + [0.0] * 23,
+            'dominant': 'Ennui',
+            'intensity': 0.1,
+            'weight': 0.1,
+            'type': 'MCT'
+        })
+
+        response = self.client.send_request('dream_cycle', {
+            'importance_threshold': 0.6,
+            'max_mct_age_hours': 24,
+            'min_weight_to_keep': 0.2
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Cycle terminé: {data.get('dream_cycle_completed')}")
+
+            consolidation = data.get('consolidation', {})
+            print(f"  → Consolidées: {consolidation.get('consolidated_count')}")
+
+            cleanup = data.get('cleanup', {})
+            print(f"  → Archivées: {cleanup.get('archived')}")
+            print(f"  → Supprimées: {cleanup.get('deleted')}")
+
+            print(f"  → Liens MLT renforcés: {data.get('reinforced_mlt_links')}")
+            return data.get('dream_cycle_completed', False)
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS PATTERNS
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_patterns(self) -> bool:
+        """Test des patterns émotionnels"""
+        patterns = ['SERENITE', 'EXCITATION', 'ANXIETE', 'DEPRESSION']
+
+        create_resp = self.client.send_request('cypher_query', {
+            'query': """
+                UNWIND $patterns AS name
+                MERGE (p:Pattern {name: name})
+                ON CREATE SET p.created_at = datetime()
+            """,
+            'params': {'patterns': patterns}
+        })
+
+        if create_resp and create_resp.get('success'):
+            print(f"  → Patterns créés/vérifiés: {patterns}")
+        else:
+            error = create_resp.get('error') if create_resp else 'Timeout'
+            print(f"  → Erreur création patterns: {error}")
+
+        response = self.client.send_request('get_pattern', {'name': 'SERENITE'})
+
+        if response and response.get('success'):
+            data = response.get('data')
+            if data:
+                print(f"  → Pattern trouvé: {data.get('name')}")
+            else:
+                print("  → Pattern non trouvé (normal si nouveau)")
+            return True
+        else:
+            error = response.get('error') if response else 'Timeout'
+            print(f"  → Erreur get_pattern: {error}")
+        return False
+
+    def test_record_transition(self) -> bool:
+        """Test enregistrement de transition entre patterns"""
+        self.client.send_request('cypher_query', {
+            'query': """
+                MERGE (p1:Pattern {name: 'TEST_PATTERN_A'})
+                MERGE (p2:Pattern {name: 'TEST_PATTERN_B'})
+            """
+        })
+
+        response = self.client.send_request('record_transition', {
+            'from': 'TEST_PATTERN_A',
+            'to': 'TEST_PATTERN_B',
+            'duration_s': 120,
+            'trigger': 'stimulus_positif'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Transition: {data.get('from')} → {data.get('to')}")
+            print(f"  → Compteur: {data.get('count')}")
+            print(f"  → Probabilité: {data.get('probability', 0):.2f}")
+
+            self.client.send_request('cypher_query', {
+                'query': "MATCH (p:Pattern) WHERE p.name STARTS WITH 'TEST_PATTERN' DETACH DELETE p"
+            })
+            return True
+        return False
+
+    def test_get_transitions(self) -> bool:
+        """Test récupération des transitions"""
+        self.client.send_request('cypher_query', {
+            'query': """
+                MERGE (p1:Pattern {name: 'ORIGINE'})
+                MERGE (p2:Pattern {name: 'DEST_A'})
+                MERGE (p3:Pattern {name: 'DEST_B'})
+                MERGE (p1)-[:TRANSITION_TO {probability: 0.6, count: 10}]->(p2)
+                MERGE (p1)-[:TRANSITION_TO {probability: 0.4, count: 7}]->(p3)
+            """
+        })
+
+        response = self.client.send_request('get_transitions', {
+            'from': 'ORIGINE',
+            'limit': 5
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Transitions depuis ORIGINE: {len(data)}")
+            for t in data:
+                print(f"    → {t.get('to_pattern')}: prob={t.get('probability', 0):.2f}")
+
+            self.client.send_request('cypher_query', {
+                'query': "MATCH (p:Pattern) WHERE p.name IN ['ORIGINE', 'DEST_A', 'DEST_B'] DETACH DELETE p"
+            })
+            return len(data) > 0
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS RELATIONS / CONCEPTS
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_extract_relations(self) -> bool:
+        """Test extraction de relations sémantiques"""
+        response = self.client.send_request('extract_relations', {
+            'text': 'Le chat noir dort paisiblement sur le canapé rouge.',
+            'store': True
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mots-clés: {data.get('keywords')}")
+            print(f"  → Relations: {data.get('relations')}")
+            print(f"  → Stockées: {data.get('stored')}")
+            return len(data.get('keywords', [])) > 0
+        return False
+
+    def test_extract_relations_with_sentence_id(self) -> bool:
+        """Test extraction de relations avec sentence_id"""
+        sentence_id = self.get_next_sentence_id()
+        
+        response = self.client.send_request('extract_relations', {
+            'text': 'Dans le parc, j\'ai vu des canards.',
+            'store': True,
+            'sentence_id': sentence_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mots-clés: {data.get('keywords')}")
+            print(f"  → Relations: {data.get('relations')}")
+            print(f"  → Sentence ID: {data.get('sentence_id')}")
+            print(f"  → Stockées: {data.get('stored')}")
+            return data.get('sentence_id') == sentence_id
+        return False
+
+    def test_create_concept(self) -> bool:
+        """Test création de concept avec sentence_ids"""
+        sentence_id = self.get_next_sentence_id()
+        
+        response = self.client.send_request('create_concept', {
+            'name': 'test_bonheur',
+            'attributes': {
+                'category': 'emotion',
+                'valence': 0.9,
+                'arousal': 0.6
+            },
+            'sentence_ids': [sentence_id]
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Concept créé: {data.get('name')}")
+            print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+            return True
+        return False
+
+    def test_link_memory_concept(self) -> bool:
+        """Test liaison mémoire-concept"""
+        mem_id = f"TEST_LINK_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.7] + [0.0] * 23,
+            'dominant': 'Joie',
+            'sentence_id': sentence_id
+        })
+
+        self.client.send_request('create_concept', {
+            'name': 'test_famille',
+            'sentence_ids': [sentence_id]
+        })
+
+        response = self.client.send_request('link_memory_concept', {
+            'memory_id': mem_id,
+            'concept_name': 'test_famille',
+            'relation': 'ASSOCIE_A',
+            'properties': {'strength': 0.8}
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Mémoire: {data.get('memory')}")
+            print(f"  → Concept: {data.get('concept')}")
+            print(f"  → Relation: {data.get('relation')}")
+            print(f"  → Memory sentence_ids: {data.get('memory_sentence_ids')}")
+            print(f"  → Concept sentence_ids: {data.get('concept_sentence_ids')}")
+            return True
+        return False
+
+    def test_get_concept_with_ids(self) -> bool:
+        """Test récupération de concept avec ses IDs de mémoires et sentence_ids"""
+        mem_id = f"TEST_CONCEPT_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.6] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le soleil brille sur la montagne',
+            'sentence_id': sentence_id
+        })
+
+        response = self.client.send_request('get_concept', {
+            'name': 'soleil'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data')
+            if data:
+                print(f"  → Concept: {data.get('name')}")
+                print(f"  → Memory IDs: {data.get('memory_ids')}")
+                print(f"  → Sentence IDs: {data.get('sentence_ids')}")
+                print(f"  → Linked memories: {data.get('linked_memories')}")
+                return len(data.get('memory_ids', [])) > 0
+        return False
+
+    def test_get_concepts_by_memory(self) -> bool:
+        """Test récupération des concepts d'une mémoire avec sentence_ids"""
+        mem_id = f"TEST_CONCEPTS_MEM_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.7] + [0.0] * 23,
+            'dominant': 'Joie',
+            'context': 'Les enfants jouent dans le jardin fleuri',
+            'sentence_id': sentence_id
+        })
+
+        response = self.client.send_request('get_concepts_by_memory', {
+            'memory_id': mem_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Concepts trouvés: {len(data)}")
+            for c in data[:5]:
+                print(f"    - {c.get('name')}: memory_ids={c.get('memory_ids')}, sentence_ids={c.get('sentence_ids')}")
+            return len(data) > 0
+        return False
+
+    def test_get_relations_with_ids(self) -> bool:
+        """Test récupération des relations avec leurs IDs de mémoires et sentence_ids"""
+        mem_id = f"TEST_REL_IDS_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.5] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le chat noir dort sur le canapé rouge',
+            'sentence_id': sentence_id
+        })
+
+        response = self.client.send_request('get_relations_with_ids', {
+            'memory_id': mem_id,
+            'limit': 10
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Relations trouvées: {len(data)}")
+            for r in data[:3]:
+                print(f"    - '{r.get('source')}' mem_ids:{r.get('source_memory_ids')} sent_ids:{r.get('source_sentence_ids')} "
+                      f"--[{r.get('relation')}]--> "
+                      f"'{r.get('target')}' mem_ids:{r.get('target_memory_ids')} sent_ids:{r.get('target_sentence_ids')}")
+            return True
+        return False
+
+    def test_get_concepts_by_sentence(self) -> bool:
+        """Test récupération des concepts par sentence_id"""
+        mem_id = f"TEST_CONCEPT_SENT_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.6] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le chien court dans le jardin',
+            'sentence_id': sentence_id
+        })
+
+        response = self.client.send_request('get_concepts_by_sentence', {
+            'sentence_id': sentence_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Concepts pour sentence_id={sentence_id}: {len(data)}")
+            for c in data[:5]:
+                print(f"    - {c.get('name')}: sentence_ids={c.get('sentence_ids')}")
+            return len(data) > 0
+        return False
+
+    def test_get_relations_by_sentence(self) -> bool:
+        """Test récupération des relations par sentence_id"""
+        mem_id = f"TEST_REL_SENT_{uuid.uuid4().hex[:8]}"
+        self.test_ids.append(mem_id)
+        sentence_id = self.get_next_sentence_id()
+
+        self.client.send_request('create_memory', {
+            'id': mem_id,
+            'emotions': [0.5] + [0.0] * 23,
+            'dominant': 'Curiosité',
+            'context': 'Le chat gris dort sur le fauteuil bleu',
+            'sentence_id': sentence_id
+        })
+
+        response = self.client.send_request('get_relations_by_sentence', {
+            'sentence_id': sentence_id
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Relations pour sentence_id={sentence_id}: {len(data)}")
+            for r in data[:3]:
+                print(f"    - '{r.get('source')}' --[{r.get('relation')}]--> '{r.get('target')}'")
+            return True  # Peut être vide si pas de relations
+        return False
+
+    def test_sentence_id_accumulation(self) -> bool:
+        """Test accumulation des sentence_ids sur un même concept"""
+        # Créer plusieurs mémoires qui partagent un concept commun
+        shared_word = "parc"
+        sentence_ids = []
+        
+        for i in range(3):
+            mem_id = f"TEST_ACCUM_{i}_{uuid.uuid4().hex[:8]}"
+            self.test_ids.append(mem_id)
+            sentence_id = self.get_next_sentence_id()
+            sentence_ids.append(sentence_id)
+            
+            contexts = [
+                f"Je me promène dans le {shared_word}.",
+                f"Les enfants jouent au {shared_word}.",
+                f"Le {shared_word} est magnifique aujourd'hui."
+            ]
+            
+            self.client.send_request('create_memory', {
+                'id': mem_id,
+                'emotions': [0.6] + [0.0] * 23,
+                'dominant': 'Joie',
+                'context': contexts[i],
+                'sentence_id': sentence_id
+            })
+
+        # Récupérer le concept partagé
+        response = self.client.send_request('get_concept', {
+            'name': shared_word
+        })
+
+        if response and response.get('success'):
+            data = response.get('data')
+            if data:
+                concept_sent_ids = data.get('sentence_ids', [])
+                print(f"  → Concept '{shared_word}':")
+                print(f"    - Sentence IDs attendus: {sentence_ids}")
+                print(f"    - Sentence IDs trouvés: {concept_sent_ids}")
+                print(f"    - Memory IDs: {data.get('memory_ids')}")
+                
+                # Vérifier que tous les sentence_ids sont présents
+                all_present = all(sid in concept_sent_ids for sid in sentence_ids)
+                print(f"    - Tous les IDs présents: {all_present}")
+                return all_present
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS SESSION
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_create_session(self) -> bool:
+        """Test création de session MCT"""
+        session_id = f"TEST_SESSION_{uuid.uuid4().hex[:8]}"
+
+        response = self.client.send_request('create_session', {
+            'id': session_id,
+            'pattern': 'SERENITE'
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', {})
+            print(f"  → Session créée: {data.get('id')}")
+            return True
+        return False
+
+    def test_update_session(self) -> bool:
+        """Test mise à jour de session"""
+        session_id = f"TEST_SESSION_UPD_{uuid.uuid4().hex[:8]}"
+
+        self.client.send_request('create_session', {
+            'id': session_id,
+            'pattern': 'NEUTRE'
+        })
+
+        response = self.client.send_request('update_session', {
+            'id': session_id,
+            'updates': {
+                'current_pattern': 'EXCITATION',
+                'stability': 0.7,
+                'volatility': 0.3
+            },
+            'emotional_state': {
+                'emotions': [0.8, 0.2] + [0.0] * 22,
+                'dominant': 'Joie',
+                'valence': 0.85,
+                'intensity': 0.75
+            }
+        })
+
+        if response and response.get('success'):
+            print(f"  → Session mise à jour: {session_id}")
+            return True
+        return False
+
+    def test_get_session(self) -> bool:
+        """Test récupération de session"""
+        session_id = f"TEST_SESSION_GET_{uuid.uuid4().hex[:8]}"
+
+        create_resp = self.client.send_request('create_session', {'id': session_id})
+        if not create_resp or not create_resp.get('success'):
+            print(f"  → Erreur création session: {create_resp}")
+            return False
+
+        print(f"  → Session créée: {session_id}")
+
+        for i in range(3):
+            self.client.send_request('update_session', {
+                'id': session_id,
+                'emotional_state': {
+                    'emotions': [0.5 + i * 0.1] + [0.0] * 23,
+                    'dominant': 'Joie',
+                    'valence': 0.6 + i * 0.1,
+                    'intensity': 0.5 + i * 0.1
+                }
+            })
+
+        response = self.client.send_request('get_session', {
+            'id': session_id,
+            'state_limit': 5
+        })
+
+        if response and response.get('success'):
+            data = response.get('data')
+            if data:
+                print(f"  → Session récupérée: {data.get('id')}")
+                print(f"  → États récents: {len(data.get('recent_states', []))}")
+                return True
+            else:
+                print("  → Session non trouvée (data=None)")
+                return False
+        else:
+            error = response.get('error') if response else 'Timeout'
+            print(f"  → Erreur: {error}")
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TESTS REQUÊTES GÉNÉRIQUES
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_cypher_query(self) -> bool:
+        """Test requête Cypher arbitraire"""
+        response = self.client.send_request('cypher_query', {
+            'query': 'MATCH (m:Memory) RETURN count(m) AS total',
+            'params': {}
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            if data:
+                print(f"  → Total mémoires: {data[0].get('total')}")
+            return True
+        return False
+
+    def test_batch_query(self) -> bool:
+        """Test batch de requêtes"""
+        response = self.client.send_request('batch_query', {
+            'queries': [
+                {'query': 'MATCH (m:Memory) RETURN count(m) AS memories'},
+                {'query': 'MATCH (c:Concept) RETURN count(c) AS concepts'},
+                {'query': 'MATCH (p:Pattern) RETURN count(p) AS patterns'}
+            ]
+        })
+
+        if response and response.get('success'):
+            data = response.get('data', [])
+            print(f"  → Résultats batch:")
+            labels = ['Mémoires', 'Concepts', 'Patterns']
+            for i, result in enumerate(data):
+                if result:
+                    print(f"    - {labels[i]}: {list(result[0].values())[0] if result else 0}")
+            return True
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # EXÉCUTION
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def run_all_tests(self):
+        """Exécute tous les tests"""
+        self.setup()
+
+        # Mémoire
+        self.run_test("Création de mémoire", self.test_create_memory)
+        self.run_test("Création mémoire avec sentence_id", self.test_create_memory_with_sentence_id)
+        self.run_test("Création mémoire avec relations", self.test_create_memory_with_relations)
+        self.run_test("Récupération de mémoire", self.test_get_memory)
+        self.run_test("Fusion de mémoires avec sentence_ids", self.test_merge_memory)
+        self.run_test("Recherche mémoires similaires", self.test_find_similar)
+        self.run_test("Réactivation de mémoire", self.test_reactivate_memory)
+
+        # Trauma
+        self.run_test("Création de trauma avec sentence_id", self.test_create_trauma)
+
+        # Decay
+        self.run_test("Application du decay (oubli)", self.test_apply_decay)
+
+        # Module Dreams
+        self.run_test("Stats MCT", self.test_get_mct_stats)
+        self.run_test("Stats MLT", self.test_get_mlt_stats)
+        self.run_test("Consolidation MCT → MLT", self.test_consolidate_all_mct)
+        self.run_test("Nettoyage MCT", self.test_cleanup_mct)
+        self.run_test("Cycle de rêve complet", self.test_dream_cycle)
+
+        # Patterns
+        self.run_test("Gestion des patterns", self.test_patterns)
+        self.run_test("Enregistrement transition", self.test_record_transition)
+        self.run_test("Récupération transitions", self.test_get_transitions)
+
+        # Relations / Concepts
+        self.run_test("Extraction de relations", self.test_extract_relations)
+        self.run_test("Extraction relations avec sentence_id", self.test_extract_relations_with_sentence_id)
+        self.run_test("Création de concept", self.test_create_concept)
+        self.run_test("Liaison mémoire-concept", self.test_link_memory_concept)
+        self.run_test("Concept avec IDs", self.test_get_concept_with_ids)
+        self.run_test("Concepts par mémoire", self.test_get_concepts_by_memory)
+        self.run_test("Relations avec IDs", self.test_get_relations_with_ids)
+        self.run_test("Concepts par sentence_id", self.test_get_concepts_by_sentence)
+        self.run_test("Relations par sentence_id", self.test_get_relations_by_sentence)
+        self.run_test("Accumulation sentence_ids", self.test_sentence_id_accumulation)
+
+        # Sessions
+        self.run_test("Création de session", self.test_create_session)
+        self.run_test("Mise à jour de session", self.test_update_session)
+        self.run_test("Récupération de session", self.test_get_session)
+
+        # Requêtes génériques
+        self.run_test("Requête Cypher", self.test_cypher_query)
+        self.run_test("Batch de requêtes", self.test_batch_query)
+
+        self.teardown()
+        self.print_summary()
+
+    def print_summary(self):
+        """Affiche le résumé des tests"""
+        print("\n" + "=" * 70)
+        print("RÉSUMÉ DES TESTS")
+        print("=" * 70)
+
+        passed = sum(1 for _, r in self.results if r)
+        total = len(self.results)
+
+        for name, result in self.results:
+            status = "✓ PASS" if result else "✗ FAIL"
+            print(f"  {status}: {name}")
+
+        print("\n" + "-" * 70)
+        print(f"TOTAL: {passed}/{total} tests réussis")
+
+        if passed == total:
+            print("\n" + "=" * 70)
+            print("    TOUS LES TESTS RÉUSSIS ✓")
+            print("=" * 70)
+        else:
+            print("\n" + "=" * 70)
+            print(f"    {total - passed} TEST(S) ÉCHOUÉ(S) ✗")
+            print("=" * 70)
+
+        return passed == total
+
+
+def main():
+    docker_mode = '--docker' in sys.argv
+
+    if docker_mode:
+        config = TestConfig(
+            rabbitmq_host=os.getenv('RABBITMQ_HOST', 'rabbitmq'),
+            rabbitmq_user=os.getenv('RABBITMQ_USER', 'virtus'),
+            rabbitmq_pass=os.getenv('RABBITMQ_PASS', 'virtus@83')
+        )
+    else:
+        config = TestConfig(
+            rabbitmq_host=os.getenv('RABBITMQ_HOST', 'localhost'),
+            rabbitmq_user=os.getenv('RABBITMQ_USER', 'virtus'),
+            rabbitmq_pass=os.getenv('RABBITMQ_PASS', 'virtus@83')
+        )
+
+    print(f"\nMode: {'Docker' if docker_mode else 'Local'}")
+    print(f"RabbitMQ: {config.rabbitmq_host}")
+
+    tester = Neo4jFullTest(config)
+
+    try:
+        success = tester.run_all_tests()
+        return 0 if success else 1
+    except Exception as e:
+        print(f"\n✗ ERREUR FATALE: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

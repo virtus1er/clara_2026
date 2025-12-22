@@ -1,0 +1,257 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{margin=2.2cm}
+
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes}
+
+\usepackage{listings}
+\lstdefinestyle{mcee}{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true,
+  tabsize=2,
+  showstringspaces=false,
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{red!55!black},
+}
+\lstset{style=mcee}
+
+\title{\textbf{MCEE -- Résumé Technique pour le Développement}\\\large Modèle Complet d'Évaluation des États}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Vue d'ensemble}
+Le \textbf{MCEE} (Modèle Complet d'Évaluation des États) est un système émotionnel complet intégrant :
+\begin{itemize}
+  \item \textbf{24 émotions instantanées} (déjà prédites par un module C++)
+  \item \textbf{Graphe de mémoire Neo4j} (structure partiellement en place)
+  \item \textbf{Mécanismes de fusion et modulation} (à implémenter)
+  \item \textbf{Système d'urgence ``Amyghaleon''} (à développer)
+\end{itemize}
+
+\section{Architecture des composants}
+
+\begin{center}
+\begin{tikzpicture}[
+  node distance=10mm,
+  box/.style={draw, rounded corners, align=center, minimum width=42mm, minimum height=11mm},
+  arrow/.style={-Latex, thick}
+]
+\node[box] (cap) {Capteurs\\Feedbacks\\\small Fb\_ext (externe), Fb\_int (interne)};
+\node[box, below=of cap] (cpp) {Module C++\\\small Prédit 24 émotions $E_i(t)$\\\small depuis 14 dimensions};
+\node[box, below=of cpp] (mcee) {MCEE Engine\\\small (à développer)\\\small Mise à jour $E_i(t{+}1)$\\\small Fusion $\rightarrow E_{\text{global}}(t{+}1)$};
+\node[box, below=of mcee] (neo) {Neo4j Graphe Mémoire\\\small Souvenirs, concepts, traumas\\\small Activation, oubli, renforcement};
+\node[box, below=of neo] (amy) {Amyghaleon\\\small Réactions d'urgence\\\small (court-circuit si trauma / pic)};
+
+\draw[arrow] (cap) -- (cpp);
+\draw[arrow] (cpp) -- (mcee);
+\draw[arrow] (mcee) -- (neo);
+\draw[arrow] (neo) -- (amy);
+\end{tikzpicture}
+\end{center}
+
+\section{Formules clés à implémenter}
+
+\subsection{Mise à jour des émotions individuelles}
+\begin{equation}
+E_i(t{+}1) = E_i(t) + \alpha\cdot Fb_{\text{ext}} + \beta\cdot Fb_{\text{int}}(t)
+- \gamma\cdot \Delta t + \delta\cdot Influence_{\text{Souvenirs}} + \theta\cdot W_t
+\end{equation}
+
+\noindent Variables :
+\begin{itemize}
+  \item $E_i(t)$ : émotion $i$ actuelle (module C++)
+  \item $\alpha,\beta,\gamma,\delta,\theta$ : coefficients de pondération (à calibrer)
+  \item $Fb_{\text{ext}}$ : feedback externe
+  \item $Fb_{\text{int}}$ : feedback interne (énergie, tension, auto-évaluation)
+  \item $\Delta t$ : delta temps (décroissance naturelle)
+  \item $W_t$ : coefficient de sagesse (expérience accumulée)
+  \item $Influence_{\text{Souvenirs}}$ : calculé depuis Neo4j
+\end{itemize}
+
+\begin{lstlisting}[language=Python, caption={Exemple de classe de mise à jour}]
+class EmotionUpdater:
+    def __init__(self, alpha=0.3, beta=0.2, gamma=0.1, delta=0.4, theta=0.1):
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.delta = delta
+        self.theta = theta
+
+    def update_emotion(self, E_current, fb_ext, fb_int, delta_t,
+                       influence_memories, wisdom):
+        E_next = (E_current +
+                  self.alpha * fb_ext +
+                  self.beta * fb_int -
+                  self.gamma * delta_t +
+                  self.delta * influence_memories +
+                  self.theta * wisdom)
+        return np.clip(E_next, 0.0, 1.0)
+\end{lstlisting}
+
+\subsection{Variance (détection d'anomalies)}
+\begin{equation}
+Var_i(t) = \frac{1}{m}\sum_{j=1}^{m}\bigl(E_i(t) - S_{i,j}\bigr)^2
+\end{equation}
+
+\begin{lstlisting}[language=Python, caption={Calcul de variance}]
+def compute_variance(emotion_current, past_values):
+    if not past_values:
+        return 0.0
+    variance = np.mean([(emotion_current - s)**2 for s in past_values])
+    return variance
+\end{lstlisting}
+
+\subsection{Fusion des émotions (stabilisation via \texorpdfstring{$\tanh$}{tanh})}
+\begin{equation}
+E_{\text{global}}(t{+}1)=\tanh\left(E_{\text{global}}(t)+\sum_i E_i(t{+}1)\cdot(1-Var_{\text{global}}(t))\right)
+\end{equation}
+
+\begin{lstlisting}[language=Python, caption={Fusion des émotions}]
+def fuse_emotions(E_global_t, emotions_updated, var_global):
+    sum_weighted = sum(e * (1 - var_global) for e in emotions_updated.values())
+    E_global_next = np.tanh(E_global_t + sum_weighted)
+    return E_global_next
+\end{lstlisting}
+
+\section{Gestion de la mémoire (Neo4j)}
+
+\subsection{Structure des nœuds (exemples)}
+\begin{lstlisting}[language=SQL, caption={Création de nœuds (Cypher)}]
+// Souvenir épisodique
+CREATE (s:Souvenir {
+    name: 'Evenement X',
+    date: date('2025-12-19'),
+    emotions: [0.7, 0.2, ...],
+    dominant: 'Joie',
+    valence: 0.7,
+    intensity: 0.8,
+    last_activated: datetime(),
+    activation_count: 1,
+    weight: 0.5,
+    type: 'positif',
+    state: 'SouvenirConsolider'
+})
+
+// Concept (abstraction)
+CREATE (c:Concept {
+    name: 'Chien',
+    keywords: ['canin', 'aboiements', 'compagnon'],
+    created_at: date('2025-12-19')
+})
+\end{lstlisting}
+
+\subsection{Relations (exemples)}
+\begin{lstlisting}[language=SQL, caption={Relations (Cypher)}]
+(souvenir)-[:EVOQUE]->(concept)
+(souvenir)-[:CONTEXTE]->(concept)
+(trauma)-[:CONCERNE]->(souvenir)
+(concept1)-[:ASSOCIE_A {
+    emotions: [...],
+    etiquette: 'peur',
+    emotions_valeur: 0.6,
+    trauma: true,
+    weight: 0.9,
+    context: 'morsure ancienne'
+}]->(concept2)
+\end{lstlisting}
+
+\subsection{Influence des souvenirs}
+Formule d'activation (résumé) :
+\begin{equation}
+A(S_i)=forget(S_i,t)\times (1+R(S_i)) \times \sum_k \bigl(C(S_i,S_k)\times Me(S_i,E_{\text{current}})\times U(S_i)\bigr)
+\end{equation}
+
+\begin{lstlisting}[language=Python, caption={Calcul d'influence mémoire (simplifié)}]
+def compute_memory_influence(souvenirs, emotion_current, delta_t):
+    total_influence = 0.0
+    for s in souvenirs:
+        forget_factor = np.exp(-0.1 * delta_t)
+        R = s['activation_count'] / 100.0
+        Me = cosine_similarity([emotion_current], [s['emotions']])[0][0]
+        days_ago = (datetime.now() - s['last_activated']).days
+        U = 1.0 / (1 + days_ago)
+        C = s.get('weight', 0.5)
+        A = forget_factor * (1 + R) * C * Me * U
+        total_influence += s.get('valence', 0.0) * A
+    return total_influence
+\end{lstlisting}
+
+\section{Traumas et mécanisme Amyghaleon (urgence)}
+
+\subsection{Critères de trauma (exemple)}
+\begin{itemize}
+  \item Intensité émotionnelle $> 0.85$
+  \item Valence négative $< 0.2$
+  \item Émotions négatives dominantes (Peur, Horreur, Anxiété, Dégoût) au-dessus d'un seuil
+\end{itemize}
+
+\begin{lstlisting}[language=Python, caption={Détection de trauma (exemple)}]
+def check_if_trauma(emotions, intensity, valence):
+    TRAUMA_INTENSITY = 0.85
+    TRAUMA_VALENCE = 0.2
+    negative_emotions = ['Peur', 'Horreur', 'Anxiete', 'Degout']
+    max_negative = max([emotions.get(e, 0) for e in negative_emotions])
+    is_trauma = (
+        intensity > TRAUMA_INTENSITY and
+        valence < TRAUMA_VALENCE and
+        max_negative > 0.7
+    )
+    return is_trauma
+\end{lstlisting}
+
+\subsection{Amyghaleon (principe)}
+Le module \textbf{Amyghaleon} court-circuite la boucle MCEE quand :
+\begin{itemize}
+  \item émotion critique $> 0.9$ (peur/horreur/dégoût, etc.)
+  \item trauma similaire activé $> 0.8$
+  \item ou combinaison des deux à des seuils plus bas
+\end{itemize}
+
+\section{Module de rêve (consolidation nocturne)}
+Déclenché périodiquement (ex. toutes les 24h ou lors d'inactivité), il :
+\begin{enumerate}
+  \item récupère les souvenirs \texttt{SouvenirConsolider} du jour,
+  \item évalue intensité/activations/similarités,
+  \item décide : consolider / oublier / fusionner,
+  \item met à jour Neo4j.
+\end{enumerate}
+
+\section{Pipeline d'intégration (proposition)}
+\begin{lstlisting}[language=Python, caption={Squelette d'un moteur MCEE (extrait)}]
+class MCEEEngine:
+    # Moteur principal du MCEE : emotions + memoire + reactions
+    def __init__(self, neo4j_uri, neo4j_user, neo4j_pass, rabbitmq_config):
+        self.graph = Graph(neo4j_uri, auth=(neo4j_user, neo4j_pass))
+        self.emotion_updater = EmotionUpdater()
+        self.memory_manager = MemoryManager(self.graph)
+        self.amyghaleon = Amyghaleon(self.graph)
+        self.dream = DreamModule(self.graph)
+        self.E_global = 0.0
+        self.wisdom = 0.0
+\end{lstlisting}
+
+\section{Roadmap (résumé)}
+\begin{itemize}
+  \item \textbf{Phase 1} : base (EmotionUpdater, MemoryManager, RabbitMQ, tests)
+  \item \textbf{Phase 2} : mémoire (activation, MCT/MLT, consolidation quotidienne)
+  \item \textbf{Phase 3} : avancé (Amyghaleon, rêve, traumas, monitoring)
+  \item \textbf{Phase 4} : optimisation (calibration, index Neo4j, tests de charge, doc)
+\end{itemize}
+
+\end{document}

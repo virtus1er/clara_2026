@@ -2,6 +2,46 @@ import spacy
 from spacy.lang.fr.stop_words import STOP_WORDS as fr_stop
 from typing import List, Tuple, Dict, Set, Optional
 from functools import lru_cache
+from dataclasses import dataclass, field
+
+
+@dataclass
+class WordWithIds:
+    """Un mot avec ses IDs de phrases"""
+    word: str
+    sentence_ids: Set[int] = field(default_factory=set)
+    
+    def add_sentence(self, sentence_id: int):
+        self.sentence_ids.add(sentence_id)
+    
+    def to_dict(self) -> Dict:
+        return {
+            'word': self.word,
+            'sentence_ids': sorted(list(self.sentence_ids))
+        }
+
+
+@dataclass
+class RelationWithIds:
+    """Une relation avec les IDs de phrases sources"""
+    source: str
+    relation: str
+    target: str
+    sentence_ids: Set[int] = field(default_factory=set)
+    
+    def add_sentence(self, sentence_id: int):
+        self.sentence_ids.add(sentence_id)
+    
+    def to_tuple(self) -> Tuple[str, str, str, List[int]]:
+        return (self.source, self.relation, self.target, sorted(list(self.sentence_ids)))
+    
+    def to_dict(self) -> Dict:
+        return {
+            'source': self.source,
+            'relation': self.relation,
+            'target': self.target,
+            'sentence_ids': sorted(list(self.sentence_ids))
+        }
 
 
 class RelationExtractor:
@@ -40,7 +80,7 @@ class RelationExtractor:
             ('advmod', 'ADJ'): 0,
             ('obl:arg', 'NOUN'): 0,
             ('obl:arg', 'ADJ'): 0,
-            ('obl:mod', 'NOUN'): 0,
+            ('obl:mod', 'NOUN'): 'LOCALISE',  # Pour les compléments de lieu
             ('cop', 'AUX'): 0,
             ('expl:subj', 'PRON'): 0,
             ('expl:comp', 'PRON'): 0,
@@ -61,7 +101,7 @@ class RelationExtractor:
             ('mark', 'SCONJ'): 0,
             ('mark', 'ADV'): 0,
             ('fixed', 'SCONJ'): 0,
-            ('advcl', 'VERB'): 0,
+            ('advcl', 'VERB'): 'ASSOCIE',  # Pour les propositions adverbiales
             ('advcl', 'NOUN'): 0,
             ('iobj', 'PRON'): 0,
             ('ccomp', 'VERB'): 0,
@@ -71,11 +111,112 @@ class RelationExtractor:
 
         self._pos_cache = {}
         self._lemma_cache = {}
+        
+        # Compteur global de phrases (peut être réinitialisé)
+        self._sentence_counter = 0
 
-    def extract(self, text: str) -> Tuple[List[str], List[Tuple[str, str, str]]]:
+    def reset_sentence_counter(self, start_value: int = 0):
+        """Réinitialise le compteur de phrases"""
+        self._sentence_counter = start_value
+
+    def get_next_sentence_id(self) -> int:
+        """Retourne et incrémente le prochain ID de phrase"""
+        self._sentence_counter += 1
+        return self._sentence_counter
+
+    def extract(self, text: str, sentence_id: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
         """
         Extrait les mots significatifs et les relations d'un texte.
 
+        Args:
+            text: Le texte à analyser
+            sentence_id: ID de phrase optionnel (auto-généré si non fourni)
+
+        Returns:
+            Tuple[List[Dict], List[Dict]]:
+                (mots_avec_ids, relations_avec_ids)
+                
+                mots_avec_ids: [{'word': str, 'sentence_ids': [int]}]
+                relations_avec_ids: [{'source': str, 'relation': str, 'target': str, 'sentence_ids': [int]}]
+        """
+        if sentence_id is None:
+            sentence_id = self.get_next_sentence_id()
+            
+        doc = self.nlp(text)
+        mots_significatifs = self._extract_significant_words(text)
+        triplets = self._extract_triplets(doc)
+        relations = self._extract_all_relations(mots_significatifs, triplets, doc)
+
+        # Convertir en format avec IDs
+        mots_avec_ids = [
+            {'word': mot, 'sentence_ids': [sentence_id]}
+            for mot in mots_significatifs
+        ]
+        
+        relations_avec_ids = [
+            {
+                'source': rel[0],
+                'relation': rel[1],
+                'target': rel[2],
+                'sentence_ids': [sentence_id]
+            }
+            for rel in relations
+        ]
+
+        return mots_avec_ids, relations_avec_ids
+
+    def extract_batch(self, texts: List[str], start_sentence_id: Optional[int] = None) -> Tuple[Dict[str, WordWithIds], Dict[str, RelationWithIds]]:
+        """
+        Extrait les mots et relations de plusieurs phrases avec fusion des IDs.
+        
+        Args:
+            texts: Liste de phrases à analyser
+            start_sentence_id: ID de départ (utilise le compteur interne si non fourni)
+            
+        Returns:
+            Tuple[Dict[str, WordWithIds], Dict[str, RelationWithIds]]:
+                (mots_fusionnés, relations_fusionnées)
+        """
+        if start_sentence_id is not None:
+            self._sentence_counter = start_sentence_id - 1
+        
+        words_map: Dict[str, WordWithIds] = {}
+        relations_map: Dict[str, RelationWithIds] = {}
+        
+        for text in texts:
+            sentence_id = self.get_next_sentence_id()
+            mots, relations = self.extract(text, sentence_id)
+            
+            # Fusionner les mots
+            for mot_dict in mots:
+                word = mot_dict['word'].lower()
+                if word in words_map:
+                    words_map[word].add_sentence(sentence_id)
+                else:
+                    w = WordWithIds(word=word)
+                    w.add_sentence(sentence_id)
+                    words_map[word] = w
+            
+            # Fusionner les relations
+            for rel_dict in relations:
+                key = f"{rel_dict['source'].lower()}|{rel_dict['relation']}|{rel_dict['target'].lower()}"
+                if key in relations_map:
+                    relations_map[key].add_sentence(sentence_id)
+                else:
+                    r = RelationWithIds(
+                        source=rel_dict['source'].lower(),
+                        relation=rel_dict['relation'],
+                        target=rel_dict['target'].lower()
+                    )
+                    r.add_sentence(sentence_id)
+                    relations_map[key] = r
+        
+        return words_map, relations_map
+
+    def extract_legacy(self, text: str) -> Tuple[List[str], List[Tuple[str, str, str]]]:
+        """
+        Version legacy sans IDs (pour rétrocompatibilité).
+        
         Returns:
             Tuple[List[str], List[Tuple[str, str, str]]]:
                 (mots_significatifs, relations)
@@ -84,7 +225,6 @@ class RelationExtractor:
         mots_significatifs = self._extract_significant_words(text)
         triplets = self._extract_triplets(doc)
         relations = self._extract_all_relations(mots_significatifs, triplets, doc)
-
         return mots_significatifs, relations
 
     def _extract_significant_words(self, text: str) -> List[str]:
@@ -224,6 +364,9 @@ class RelationExtractor:
 
         # 7. Relations zéro
         all_relations.extend(self._extract_zero_relations(significatifs, triplets))
+        
+        # 8. Relations de localisation (nouveau)
+        all_relations.extend(self._extract_location_relations(significatifs, doc))
 
         # Dédoublonner
         seen = set()
@@ -407,6 +550,45 @@ class RelationExtractor:
 
         return relations
 
+    def _extract_location_relations(self, significatifs: List[str],
+                                    doc) -> List[Tuple[str, str, str]]:
+        """Extrait les relations de localisation (dans, sur, au, etc.)"""
+        relations = []
+        
+        # Prépositions de lieu
+        location_preps = {'dans', 'sur', 'au', 'à', 'en', 'chez', 'vers', 'sous', 'devant', 'derrière'}
+        
+        for token in doc:
+            # Chercher les compléments de lieu (obl:mod avec préposition de lieu)
+            if token.dep_ in ('obl:mod', 'obl:arg', 'nmod'):
+                # Vérifier s'il y a une préposition de lieu
+                has_location_prep = False
+                for child in token.children:
+                    if child.dep_ == 'case' and child.text.lower() in location_preps:
+                        has_location_prep = True
+                        break
+                
+                if has_location_prep:
+                    # Le token est le lieu, son head est le verbe/nom principal
+                    sig_location = self._find_in_significatifs(token.text, significatifs)
+                    if not sig_location:
+                        sig_location = self._find_in_significatifs(token.lemma_, significatifs)
+                    
+                    # Trouver l'objet ou sujet principal de la phrase
+                    head = token.head
+                    if head.pos_ == 'VERB':
+                        # Chercher l'objet du verbe
+                        for sibling in head.children:
+                            if sibling.dep_ in ('obj', 'nsubj') and sibling != token:
+                                sig_obj = self._find_in_significatifs(sibling.text, significatifs)
+                                if not sig_obj:
+                                    sig_obj = self._find_in_significatifs(sibling.lemma_, significatifs)
+                                
+                                if sig_obj and sig_location and sig_obj != sig_location:
+                                    relations.append((sig_obj, 'LOCALISE', sig_location))
+                    
+        return relations
+
     def _cover_unused_words(self, significatifs: List[str], used: Set[str],
                             triplets: List[Tuple], doc) -> List[Tuple[str, str, str]]:
         """Couvre les mots non utilisés"""
@@ -430,27 +612,51 @@ class RelationExtractor:
 if __name__ == "__main__":
     ex = RelationExtractor()
 
-    phrases_simples = [
-        "Le chat noir dort paisiblement",
-        "Marie cuisine un délicieux gâteau au chocolat.",
-        "il est malade et il n'est pas gentil.",
-        "Sylvain a un chat noir et blanc qui est gentil.",
-        "L'enfant dessine un beau paysage avec des crayons colorés.",
-        "Sophie écoute de la musique classique dans sa chambre.",
-        "Thomas et Sarah dansent et chantent joyeusement.",
-        "Le chien aboie mais il n'est pas méchant.",
-        "Anna a acheté une robe. Elle est très belle et coûteuse.",
-        "Le directeur est arrivé. Il semble fatigué mais content.",
-        "Mes parents voyagent beaucoup. Ils visitent l'Italie cette année.",
-        "Cette maison appartient à mon oncle. Elle a cent ans.",
-        "Le livre que j'ai lu était passionnant. Il raconte une histoire d'amour.",
-        "J'adore cuisiner des plats épicés le dimanche.",
-        "Il refuse de parler à ses voisins bruyants.",
-        "Nous décidons d'acheter une nouvelle voiture électrique.",
-        "Elle commence à étudier le japonais à l'université.",
-        "Ils essaient de résoudre ce problème mathématique complexe.",
-        "La voiture rouge et la moto bleue roulent sur l'autoroute."
+    # Tests avec sentence_ids
+    phrases_test = [
+        "Dans le parc, j'ai vu des canards.",
+        "Au jardin, il y a des fleurs.",
+        "Sur la table, j'ai posé un livre.",
+        "Je me promenais dans le parc quand il a commencé à pleuvoir.",
+        "Je suis en train de lire un livre sur les voitures.",
     ]
 
-    for phrase in phrases_simples:
-        print(ex.extract(phrase))
+    print("=" * 80)
+    print("TEST AVEC SENTENCE_IDS")
+    print("=" * 80)
+    
+    ex.reset_sentence_counter()
+    
+    for i, phrase in enumerate(phrases_test, 1):
+        print(f"\n[Phrase {i}] {phrase}")
+        mots, relations = ex.extract(phrase, sentence_id=i)
+        
+        print(f"  Mots: {[m['word'] for m in mots]}")
+        for rel in relations:
+            print(f"  → '{rel['source']}' id:{rel['sentence_ids']} {rel['relation']} '{rel['target']}' id:{rel['sentence_ids']}")
+    
+    print("\n" + "=" * 80)
+    print("TEST BATCH AVEC FUSION DES IDS")
+    print("=" * 80)
+    
+    ex.reset_sentence_counter()
+    words_map, relations_map = ex.extract_batch(phrases_test, start_sentence_id=1)
+    
+    print("\nMots avec IDs fusionnés:")
+    for word, w_obj in sorted(words_map.items()):
+        print(f"  '{word}' → ids: {sorted(w_obj.sentence_ids)}")
+    
+    print("\nRelations avec IDs fusionnés:")
+    for key, rel in relations_map.items():
+        print(f"  '{rel.source}' ids:{sorted(rel.sentence_ids)} {rel.relation} '{rel.target}' ids:{sorted(rel.sentence_ids)}")
+
+    print("\n" + "=" * 80)
+    print("TEST LEGACY (rétrocompatibilité)")
+    print("=" * 80)
+    
+    for phrase in phrases_test[:2]:
+        print(f"\n{phrase}")
+        mots, rels = ex.extract_legacy(phrase)
+        print(f"  Mots: {mots}")
+        for r in rels:
+            print(f"  → {r}")
