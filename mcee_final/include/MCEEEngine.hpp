@@ -25,6 +25,7 @@
 #include "MemoryManager.hpp"
 #include "SpeechInput.hpp"
 #include "ConscienceEngine.hpp"
+#include "ADDOEngine.hpp"
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -227,9 +228,19 @@ public:
     std::shared_ptr<ConscienceEngine> getConscienceEngine() { return conscience_engine_; }
 
     /**
+     * @brief Retourne l'ADDOEngine (Détermination des Objectifs)
+     */
+    std::shared_ptr<ADDOEngine> getADDOEngine() { return addo_engine_; }
+
+    /**
      * @brief Récupère l'état de conscience et sentiment actuel
      */
     ConscienceSentimentState getConscienceState() const;
+
+    /**
+     * @brief Récupère l'objectif courant G(t)
+     */
+    GoalState getGoalState() const;
 
     /**
      * @brief Envoie un feedback sur le pattern actuel
@@ -257,6 +268,7 @@ private:
     std::shared_ptr<MLT> mlt_;
     std::shared_ptr<PatternMatcher> pattern_matcher_;
     std::shared_ptr<ConscienceEngine> conscience_engine_;  // Module Conscience & Sentiments
+    std::shared_ptr<ADDOEngine> addo_engine_;              // Module Détermination des Objectifs
     MatchResult current_match_;
 
     // ID de la dernière émotion ajoutée (pour liaison avec mots)

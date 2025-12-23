@@ -1,428 +1,300 @@
 /**
- * @file MCEEEngine.hpp
- * @brief Moteur principal du MCEE (Modèle Complet d'Évaluation des États)
- * @version 3.0
- * @date 2024
- * 
- * Architecture MCT/MLT avec patterns dynamiques :
- * - MCT (Mémoire Court Terme) : Buffer temporel des états
- * - MLT (Mémoire Long Terme) : Patterns émotionnels dynamiques
- * - PatternMatcher : Identification et création de patterns
- * - Amyghaleon : Système d'urgence
+ * @file ADDOEngine.hpp
+ * @brief Moteur ADDO - Algorithme de Détermination Dynamique des Objectifs
+ * @version 1.0
+ * @date 2025-12-23
+ *
+ * Implémente l'équation:
+ * G(t) = f( Σ w_i·P_i·L_i + Σ c_ij^+·P_i·P_j - Σ c_ik^-·P_i·P_k
+ *          + Rs(t)·Σ P_ℓ + S(t) + M_graph(t) )
  */
 
-#ifndef MCEE_ENGINE_HPP
-#define MCEE_ENGINE_HPP
+#pragma once
 
+#include "ADDOConfig.hpp"
+#include "ConscienceConfig.hpp"
 #include "Types.hpp"
-#include "MCT.hpp"
-#include "MCTGraph.hpp"
-#include "MLT.hpp"
-#include "PatternMatcher.hpp"
-#include "PhaseDetector.hpp"
-#include "EmotionUpdater.hpp"
-#include "Amyghaleon.hpp"
-#include "MemoryManager.hpp"
-#include "SpeechInput.hpp"
-#include "ConscienceEngine.hpp"
-#include "ADDOEngine.hpp"
-#include <SimpleAmqpClient/SimpleAmqpClient.h>
-#include <nlohmann/json.hpp>
-#include <atomic>
-#include <thread>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
-#include <functional>
 #include <memory>
+#include <deque>
+#include <mutex>
 
 namespace mcee {
 
-using json = nlohmann::json;
-
 /**
- * @brief Configuration RabbitMQ
+ * @class ADDOEngine
+ * @brief Moteur de détermination dynamique des objectifs
  */
-struct RabbitMQConfig {
-    std::string host = "localhost";
-    int port = 5672;
-    std::string user = "virtus";
-    std::string password = "virtus@83";
-    
-    // Entrée émotions (depuis module emotion C++)
-    std::string emotions_exchange = "mcee.emotional.input";
-    std::string emotions_routing_key = "emotions.predictions";
-    
-    // Entrée parole (depuis module speech)
-    std::string speech_exchange = "mcee.speech.input";
-    std::string speech_routing_key = "speech.text";
-
-    // Entrée tokens Neo4j/spaCy (pour MCTGraph)
-    std::string tokens_exchange = "neo4j.tokens.output";
-    std::string tokens_routing_key = "tokens.extracted";
-
-    // Sortie état MCEE
-    std::string output_exchange = "mcee.emotional.output";
-    std::string output_routing_key = "mcee.state";
-
-    // Sortie snapshots MCTGraph (vers module rêves)
-    std::string snapshot_exchange = "mcee.mct.snapshot";
-    std::string snapshot_routing_key = "mct.graph";
-};
-
-/**
- * @class MCEEEngine
- * @brief Moteur principal du système MCEE v3.0 avec MCT/MLT
- * 
- * Flux de traitement :
- * 1. Réception émotions/parole → MCT (buffer)
- * 2. Extraction signature MCT → PatternMatcher
- * 3. Comparaison avec MLT → Pattern identifié
- * 4. Coefficients dynamiques → EmotionUpdater
- * 5. Nouvelle émotion → MCT + consolidation MLT
- */
-class MCEEEngine {
+class ADDOEngine {
 public:
-    using StateCallback = std::function<void(const EmotionalState&, const std::string& pattern_name)>;
-
     /**
-     * @brief Constructeur
-     * @param rabbitmq_config Configuration RabbitMQ
+     * @brief Constructeur avec configuration
+     * @param config Configuration ADDO
      */
-    explicit MCEEEngine(const RabbitMQConfig& rabbitmq_config = RabbitMQConfig{});
+    explicit ADDOEngine(const ADDOConfig& config = ADDOConfig{});
 
     /**
      * @brief Destructeur
      */
-    ~MCEEEngine();
+    ~ADDOEngine() = default;
 
-    // Non-copyable
-    MCEEEngine(const MCEEEngine&) = delete;
-    MCEEEngine& operator=(const MCEEEngine&) = delete;
-
-    /**
-     * @brief Démarre le moteur MCEE
-     * @return true si démarrage réussi
-     */
-    bool start();
+    // ═══════════════════════════════════════════════════════════════════════
+    // MISE À JOUR PRINCIPALE
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Arrête le moteur MCEE
+     * @brief Met à jour l'objectif G(t) avec les entrées courantes
+     * @param emotional_state État émotionnel (pour Sentiments)
+     * @param sentiment Ft du ConscienceEngine
+     * @param wisdom Wt du ConscienceEngine
+     * @return État de l'objectif calculé
      */
-    void stop();
+    GoalState update(const EmotionalState& emotional_state,
+                     double sentiment,
+                     double wisdom);
 
     /**
-     * @brief Vérifie si le moteur est en cours d'exécution
+     * @brief Met à jour avec influence mémoire explicite
+     * @param emotional_state État émotionnel
+     * @param sentiment Ft
+     * @param wisdom Wt
+     * @param memory_influence Influence de la mémoire graphe
+     * @return État de l'objectif
      */
-    [[nodiscard]] bool isRunning() const { return running_.load(); }
+    GoalState updateWithMemory(const EmotionalState& emotional_state,
+                               double sentiment,
+                               double wisdom,
+                               const MemoryGraphInfluence& memory_influence);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MODIFICATION DES VARIABLES
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Traite un état émotionnel (entrée directe sans RabbitMQ)
-     * @param raw_emotions Émotions brutes (24 valeurs)
+     * @brief Définit une variable P_i(t)
+     * @param var Variable à modifier
+     * @param value Nouvelle valeur [0, 1]
      */
-    void processEmotions(const std::unordered_map<std::string, double>& raw_emotions);
+    void setVariable(GoalVariable var, double value);
 
     /**
-     * @brief Traite un texte reçu du module de parole
-     * @param text Texte à traiter
-     * @param source Source du texte (user, environment, system)
+     * @brief Définit une contrainte L_i(t)
+     * @param var Variable concernée
+     * @param constraint Contrainte [0, 2] (0=bloqué, 1=normal, 2=amplifié)
      */
-    void processSpeechText(const std::string& text, const std::string& source = "user");
+    void setConstraint(GoalVariable var, double constraint);
 
     /**
-     * @brief Définit les feedbacks externes/internes
+     * @brief Met à jour plusieurs variables depuis un contexte externe
+     * @param environment Score environnement [0, 1]
+     * @param circumstances Score circonstances [0, 1]
      */
-    void setFeedback(double external, double internal);
+    void updateExternalContext(double environment, double circumstances);
 
     /**
-     * @brief Retourne le gestionnaire de parole
+     * @brief Met à jour les variables liées aux besoins
+     * @param physiological Besoins physiologiques satisfaits [0, 1]
+     * @param safety Sécurité [0, 1]
+     * @param belonging Appartenance [0, 1]
+     * @param esteem Estime [0, 1]
+     * @param self_actualization Auto-actualisation [0, 1]
      */
-    SpeechInput& getSpeechInput() { return speech_input_; }
+    void updateNeeds(double physiological, double safety, double belonging,
+                     double esteem, double self_actualization);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // RÉSILIENCE ET TRAUMA
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Définit le callback pour les changements d'état
+     * @brief Enregistre un succès (augmente la résilience)
+     * @param intensity Intensité du succès [0, 1]
      */
-    void setStateCallback(StateCallback callback);
+    void recordSuccess(double intensity);
 
     /**
-     * @brief Retourne l'état émotionnel actuel
+     * @brief Enregistre un échec (peut diminuer la résilience)
+     * @param intensity Intensité de l'échec [0, 1]
      */
-    [[nodiscard]] const EmotionalState& getCurrentState() const { return current_state_; }
+    void recordFailure(double intensity);
 
     /**
-     * @brief Retourne le nom du pattern actuel (remplace Phase)
+     * @brief Signale un trauma actif
+     * @param trauma État du trauma
      */
-    [[nodiscard]] std::string getCurrentPatternName() const;
+    void signalTrauma(const TraumaState& trauma);
 
     /**
-     * @brief Retourne l'ID du pattern actuel
+     * @brief Définit l'influence de la mémoire graphe
+     * @param S_positive Somme souvenirs positifs
+     * @param S_negative Somme souvenirs négatifs
+     * @param T_trauma Intensité trauma
      */
-    [[nodiscard]] std::string getCurrentPatternId() const;
+    void setMemoryInfluence(double S_positive, double S_negative, double T_trauma);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // URGENCE (AMYGHALEON)
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Retourne les statistiques
+     * @brief Active le mode urgence (court-circuite G(t))
+     * @param emergency_goal Objectif d'urgence (SURVIE, FUITE, PROTECTION)
      */
-    [[nodiscard]] const MCEEStats& getStats() const { return stats_; }
+    void triggerEmergencyOverride(const std::string& emergency_goal);
 
     /**
-     * @brief Retourne les coefficients actuels du pattern
+     * @brief Désactive le mode urgence
      */
-    [[nodiscard]] MatchResult getCurrentMatchResult() const { return current_match_; }
+    void clearEmergencyOverride();
 
     /**
-     * @brief Charge la configuration depuis un fichier JSON
-     * @param config_path Chemin vers le fichier de configuration
-     * @param skip_neo4j Si true, ignore la configuration Neo4j (mode démo)
-     * @return true si chargement réussi
+     * @brief Vérifie si en mode urgence
      */
-    bool loadConfig(const std::string& config_path, bool skip_neo4j = false);
+    [[nodiscard]] bool isInEmergencyMode() const;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ACCESSEURS
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Charge les patterns depuis un fichier
+     * @brief Retourne l'objectif courant G(t)
      */
-    bool loadPatterns(const std::string& path);
+    [[nodiscard]] double getCurrentGoal() const;
 
     /**
-     * @brief Sauvegarde les patterns dans un fichier
+     * @brief Retourne l'état complet
      */
-    bool savePatterns(const std::string& path) const;
+    [[nodiscard]] const GoalState& getCurrentState() const;
 
     /**
-     * @brief Force un pattern spécifique
+     * @brief Retourne la résilience Rs(t)
      */
-    void forcePattern(const std::string& pattern_name, const std::string& reason = "MANUAL");
+    [[nodiscard]] double getResilience() const;
 
     /**
-     * @brief Crée un nouveau pattern à partir de l'état actuel
+     * @brief Retourne les variables courantes
      */
-    std::string createPatternFromCurrent(const std::string& name, const std::string& description = "");
+    [[nodiscard]] const GoalVariables& getVariables() const;
 
     /**
-     * @brief Retourne le gestionnaire de mémoire
+     * @brief Retourne la matrice d'interactions
      */
-    MemoryManager& getMemoryManager() { return memory_manager_; }
+    [[nodiscard]] const InteractionMatrix& getInteractionMatrix() const;
 
     /**
-     * @brief Retourne la MCT
+     * @brief Retourne la configuration
      */
-    std::shared_ptr<MCT> getMCT() { return mct_; }
+    [[nodiscard]] const ADDOConfig& getConfig() const { return config_; }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CALLBACKS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    void setUpdateCallback(GoalUpdateCallback callback);
+    void setGoalChangeCallback(GoalChangeCallback callback);
+    void setEmergencyCallback(EmergencyGoalCallback callback);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // HISTORIQUE
+    // ═══════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Retourne la MLT
+     * @brief Retourne l'historique des objectifs
      */
-    std::shared_ptr<MLT> getMLT() { return mlt_; }
+    [[nodiscard]] const std::deque<double>& getGoalHistory() const;
 
     /**
-     * @brief Retourne le PatternMatcher
+     * @brief Retourne la tendance de l'objectif (croissant/décroissant)
      */
-    std::shared_ptr<PatternMatcher> getPatternMatcher() { return pattern_matcher_; }
+    [[nodiscard]] double getGoalTrend() const;
 
     /**
-     * @brief Retourne le MCTGraph (graphe relationnel mots-émotions)
+     * @brief Retourne la stabilité de l'objectif
      */
-    std::shared_ptr<MCTGraph> getMCTGraph() { return mct_graph_; }
-
-    /**
-     * @brief Retourne le ConscienceEngine
-     */
-    std::shared_ptr<ConscienceEngine> getConscienceEngine() { return conscience_engine_; }
-
-    /**
-     * @brief Retourne l'ADDOEngine (Détermination des Objectifs)
-     */
-    std::shared_ptr<ADDOEngine> getADDOEngine() { return addo_engine_; }
-
-    /**
-     * @brief Récupère l'état de conscience et sentiment actuel
-     */
-    ConscienceSentimentState getConscienceState() const;
-
-    /**
-     * @brief Récupère l'objectif courant G(t)
-     */
-    GoalState getGoalState() const;
-
-    /**
-     * @brief Envoie un feedback sur le pattern actuel
-     * @param feedback Score [-1, 1]
-     */
-    void provideFeedback(double feedback);
-
-    /**
-     * @brief Déclenche une passe d'apprentissage MLT
-     */
-    void runLearning();
-
-    // Compatibilité legacy (Phase)
-    [[nodiscard]] Phase getCurrentPhase() const { return phase_detector_.getCurrentPhase(); }
-    [[nodiscard]] const PhaseConfig& getPhaseConfig() const { return phase_detector_.getCurrentConfig(); }
-    void forcePhaseTransition(Phase phase, const std::string& reason = "MANUAL");
+    [[nodiscard]] double getGoalStability() const;
 
 private:
-    // Configuration
-    RabbitMQConfig rabbitmq_config_;
+    ADDOConfig config_;
+    GoalState current_state_;
+    GoalVariables variables_;
+    InteractionMatrix interactions_;
 
-    // Nouveau système MCT/MLT (v3)
-    std::shared_ptr<MCT> mct_;
-    std::shared_ptr<MCTGraph> mct_graph_;  // Graphe relationnel mots-émotions
-    std::shared_ptr<MLT> mlt_;
-    std::shared_ptr<PatternMatcher> pattern_matcher_;
-    std::shared_ptr<ConscienceEngine> conscience_engine_;  // Module Conscience & Sentiments
-    std::shared_ptr<ADDOEngine> addo_engine_;              // Module Détermination des Objectifs
-    MatchResult current_match_;
+    double resilience_;
+    MemoryGraphInfluence memory_influence_;
 
-    // ID de la dernière émotion ajoutée (pour liaison avec mots)
-    std::string last_emotion_node_id_;
+    bool emergency_mode_ = false;
+    std::string emergency_goal_;
 
-    // Composants legacy (pour compatibilité)
-    PhaseDetector phase_detector_;
-    EmotionUpdater emotion_updater_;
-    Amyghaleon amyghaleon_;
-    MemoryManager memory_manager_;
-    SpeechInput speech_input_;
+    // Historique
+    std::deque<double> goal_history_;
+    static constexpr size_t MAX_HISTORY_SIZE = 100;
 
-    // État
-    EmotionalState current_state_;
-    EmotionalState previous_state_;
-    Feedback current_feedback_;
-    SpeechAnalysis last_speech_analysis_;
-    double wisdom_ = 0.0;
-    MCEEStats stats_;
+    // Callbacks
+    GoalUpdateCallback on_update_;
+    GoalChangeCallback on_goal_change_;
+    EmergencyGoalCallback on_emergency_;
 
-    // RabbitMQ
-    AmqpClient::Channel::ptr_t channel_;
-    std::string emotions_consumer_tag_;
-    std::string speech_consumer_tag_;
-    std::string tokens_consumer_tag_;
+    // Générateur aléatoire pour stochasticité
+    std::mt19937 rng_;
+    std::normal_distribution<double> noise_dist_;
 
-    // Threading
-    std::atomic<bool> running_{false};
-    std::thread emotions_consumer_thread_;
-    std::thread speech_consumer_thread_;
-    std::thread tokens_consumer_thread_;
-    std::thread snapshot_timer_thread_;
-    std::mutex state_mutex_;
-    StateCallback on_state_change_;
+    mutable std::mutex mutex_;
 
-    // Timestamps
-    std::chrono::steady_clock::time_point last_update_time_;
-    std::chrono::steady_clock::time_point pattern_start_time_;
+    // ─────────────────────────────────────────────────────────────────────────
+    // Méthodes privées
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * @brief Initialise la connexion RabbitMQ
+     * @brief Calcule Σ w_i·P_i·L_i
      */
-    bool initRabbitMQ();
+    [[nodiscard]] double computeWeightedSum() const;
 
     /**
-     * @brief Initialise le système MCT/MLT
+     * @brief Calcule les interactions positives Σ c_ij^+·P_i·P_j
      */
-    void initMemorySystem();
+    [[nodiscard]] double computePositiveInteractions() const;
 
     /**
-     * @brief Boucle de consommation des émotions RabbitMQ
+     * @brief Calcule les interactions négatives Σ c_ik^-·P_i·P_k
      */
-    void emotionsConsumeLoop();
+    [[nodiscard]] double computeNegativeInteractions() const;
 
     /**
-     * @brief Boucle de consommation des textes RabbitMQ
+     * @brief Calcule le terme de résilience Rs(t)·Σ P_ℓ
      */
-    void speechConsumeLoop();
+    [[nodiscard]] double computeResilienceTerm() const;
 
     /**
-     * @brief Boucle de consommation des tokens Neo4j/spaCy
+     * @brief Génère le terme stochastique S(t)
      */
-    void tokensConsumeLoop();
+    [[nodiscard]] double generateStochasticity();
 
     /**
-     * @brief Boucle du timer pour export snapshots MCTGraph
+     * @brief Calcule M_graph(t)
      */
-    void snapshotTimerLoop();
+    [[nodiscard]] double computeMemoryInfluence() const;
 
     /**
-     * @brief Traite un message d'émotion RabbitMQ
-     * @param body Corps du message (JSON)
+     * @brief Applique la fonction de sortie f()
+     * @param raw_value Valeur brute
+     * @return Valeur normalisée
      */
-    void handleEmotionMessage(const std::string& body);
+    [[nodiscard]] double applyOutputFunction(double raw_value) const;
 
     /**
-     * @brief Traite un message de parole RabbitMQ
-     * @param body Corps du message (JSON)
+     * @brief Met à jour les poids adaptatifs
+     * @param wisdom Sagesse Wt
      */
-    void handleSpeechMessage(const std::string& body);
+    void adaptWeights(double wisdom);
 
     /**
-     * @brief Traite un message de tokens Neo4j/spaCy
-     * @param body Corps du message (JSON)
+     * @brief Trouve la variable dominante
      */
-    void handleTokensMessage(const std::string& body);
+    void findDominantVariable();
 
     /**
-     * @brief Publie un snapshot MCTGraph vers le module rêves
+     * @brief Met à jour l'historique
      */
-    void publishSnapshot(const MCTGraphSnapshot& snapshot);
-
-    /**
-     * @brief Pipeline de traitement MCEE v3 complet
-     * @param raw_emotions Émotions brutes du module C++
-     */
-    void processPipeline(const std::unordered_map<std::string, double>& raw_emotions);
-
-    /**
-     * @brief Étape 1: Ajoute l'état brut à la MCT
-     */
-    void pushToMCT(const EmotionalState& state);
-
-    /**
-     * @brief Étape 2: Identifie le pattern via MLT
-     */
-    MatchResult identifyPattern();
-
-    /**
-     * @brief Étape 3: Applique les coefficients du pattern
-     */
-    EmotionalState applyPatternCoefficients(const EmotionalState& raw_state, const MatchResult& match);
-
-    /**
-     * @brief Étape 4: Consolide en MLT si significatif
-     */
-    void consolidateToMLT();
-
-    /**
-     * @brief Publie l'état actuel via RabbitMQ
-     */
-    void publishState();
-
-    /**
-     * @brief Met à jour la sagesse accumulée
-     */
-    void updateWisdom();
-
-    /**
-     * @brief Gère les urgences (patterns à seuil bas)
-     */
-    void handleEmergency(const MatchResult& match);
-
-    /**
-     * @brief Exécute une action d'urgence
-     */
-    void executeEmergencyAction(const EmergencyResponse& response);
-
-    /**
-     * @brief Convertit les émotions brutes en EmotionalState
-     */
-    EmotionalState rawToState(const std::unordered_map<std::string, double>& raw) const;
-
-    /**
-     * @brief Affiche l'état émotionnel actuel
-     */
-    void printState() const;
-
-    /**
-     * @brief Configure les callbacks MCT/MLT/Matcher
-     */
-    void setupCallbacks();
+    void updateHistory(double goal);
 };
 
 } // namespace mcee
-
-#endif // MCEE_ENGINE_HPP
