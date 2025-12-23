@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <nlohmann/json.hpp>
