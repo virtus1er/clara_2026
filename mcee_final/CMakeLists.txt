@@ -42,11 +42,12 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Source files - Version 3.0 avec MCT/MLT + Neo4j
+# Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph
 set(MCEE_SOURCES
     src/main.cpp
     src/MCEEEngine.cpp
     src/MCT.cpp
+    src/MCTGraph.cpp
     src/MLT.cpp
     src/PatternMatcher.cpp
     src/PhaseDetector.cpp
@@ -61,6 +62,7 @@ set(MCEE_HEADERS
     include/Types.hpp
     include/MCEEEngine.hpp
     include/MCT.hpp
+    include/MCTGraph.hpp
     include/MLT.hpp
     include/PhaseDetector.hpp
     include/EmotionUpdater.hpp
