@@ -24,6 +24,7 @@
 #include "Amyghaleon.hpp"
 #include "MemoryManager.hpp"
 #include "SpeechInput.hpp"
+#include "ConscienceEngine.hpp"
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -221,6 +222,16 @@ public:
     std::shared_ptr<MCTGraph> getMCTGraph() { return mct_graph_; }
 
     /**
+     * @brief Retourne le ConscienceEngine
+     */
+    std::shared_ptr<ConscienceEngine> getConscienceEngine() { return conscience_engine_; }
+
+    /**
+     * @brief Récupère l'état de conscience et sentiment actuel
+     */
+    ConscienceSentimentState getConscienceState() const;
+
+    /**
      * @brief Envoie un feedback sur le pattern actuel
      * @param feedback Score [-1, 1]
      */
@@ -245,6 +256,7 @@ private:
     std::shared_ptr<MCTGraph> mct_graph_;  // Graphe relationnel mots-émotions
     std::shared_ptr<MLT> mlt_;
     std::shared_ptr<PatternMatcher> pattern_matcher_;
+    std::shared_ptr<ConscienceEngine> conscience_engine_;  // Module Conscience & Sentiments
     MatchResult current_match_;
 
     // ID de la dernière émotion ajoutée (pour liaison avec mots)
