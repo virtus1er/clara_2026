@@ -58,6 +58,44 @@ struct MemoryEdge {
 };
 
 /**
+ * Lien causal mot→émotion (issu du MCTGraph)
+ */
+struct CausalLink {
+    std::string wordId;
+    std::string wordLemma;
+    std::string wordPos;                  // NOUN, VERB, ADJ...
+    std::string emotionId;
+    std::string dominantEmotion;          // Émotion dominante déclenchée
+    double causalStrength;                // Force du lien [0, 1]
+    double temporalDistanceMs;            // Délai mot→émotion
+    std::chrono::steady_clock::time_point timestamp;
+};
+
+/**
+ * Nœud mot enrichi (issu du MCTGraph snapshot)
+ */
+struct WordNodeSnapshot {
+    std::string id;
+    std::string lemma;
+    std::string pos;
+    std::string sentenceId;
+    double sentimentScore = 0.0;
+    bool isNegation = false;
+    bool isIntensifier = false;
+};
+
+/**
+ * Statistiques causales globales
+ */
+struct CausalStats {
+    std::vector<std::string> topTriggerWords;  // Mots causant le plus d'émotions
+    std::string mostFrequentEmotion;
+    double averageEmotionIntensity = 0.0;
+    size_t totalCausalEdges = 0;
+    double graphDensity = 0.0;
+};
+
+/**
  * Callback pour notifier les changements d'état
  */
 using DreamStateCallback = std::function<void(DreamState oldState, DreamState newState)>;
@@ -144,6 +182,33 @@ public:
      * Vide la MCT (après consolidation complète)
      */
     void clearMCT();
+
+    // ═══════════════════════════════════════════════════════════
+    // GESTION DES LIENS CAUSAUX (MCTGraph)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Traite un snapshot MCTGraph enrichi
+     * Extrait les liens causaux mot→émotion
+     */
+    void processMCTGraphSnapshot(const std::vector<WordNodeSnapshot>& words,
+                                  const std::vector<CausalLink>& causalLinks,
+                                  const CausalStats& stats);
+
+    /**
+     * Récupère les liens causaux actifs
+     */
+    [[nodiscard]] const std::vector<CausalLink>& getCausalLinks() const;
+
+    /**
+     * Récupère les mots déclencheurs (top trigger words)
+     */
+    [[nodiscard]] const std::vector<std::string>& getTopTriggerWords() const;
+
+    /**
+     * Vide les liens causaux
+     */
+    void clearCausalLinks();
     
     // ═══════════════════════════════════════════════════════════
     // CALLBACKS
@@ -187,6 +252,12 @@ private:
     void executeConsolidatePhase();
     void executeExplorePhase();
     void executeCleanupPhase();
+
+    /**
+     * Génère des associations basées sur les liens causaux
+     * Relie les souvenirs partageant des mots déclencheurs communs
+     */
+    void exploreCausalAssociations();
     
     // ═══════════════════════════════════════════════════════════
     // CALCULS
@@ -246,9 +317,14 @@ private:
     
     // MCT buffer
     std::vector<Memory> mctBuffer_;
-    
+
     // Souvenirs scorés pendant le scan
     std::vector<Memory> scoredMemories_;
+
+    // Données MCTGraph (liens causaux mot→émotion)
+    std::vector<CausalLink> causalLinks_;
+    std::vector<WordNodeSnapshot> wordNodes_;
+    CausalStats causalStats_;
     
     // Arêtes à traiter
     std::vector<MemoryEdge> edgesToReinforce_;

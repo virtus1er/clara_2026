@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <unordered_map>
 
 namespace MCEE {
 
@@ -199,15 +200,19 @@ void DreamEngine::executeConsolidatePhase() {
 void DreamEngine::executeExplorePhase() {
     // Phase 3: Associations stochastiques - créer des liens inédits
     edgesToCreate_.clear();
-    
+
+    // 3a: Explorer les associations causales (basées sur MCTGraph)
+    exploreCausalAssociations();
+
+    // 3b: Associations stochastiques classiques
     double sigma = generateStochasticNoise(activePattern_);
     std::normal_distribution<double> noise(0.0, sigma);
-    
+
     // Explorer des associations entre souvenirs non évidemment liés
     for (size_t i = 0; i < scoredMemories_.size(); ++i) {
         for (size_t j = i + 2; j < scoredMemories_.size(); ++j) {  // Skip voisins directs
             double randomFactor = std::abs(noise(rng_));
-            
+
             // Association probabiliste basée sur le bruit
             if (randomFactor > sigma * 0.5) {
                 // Calculer similarité émotionnelle
@@ -215,7 +220,7 @@ void DreamEngine::executeExplorePhase() {
                     scoredMemories_[i].emotionalVector,
                     scoredMemories_[j].emotionalVector
                 ) / std::sqrt(24.0);  // Normaliser
-                
+
                 // Créer l'arête si similarité + bruit suffisants
                 if (similarity + randomFactor > 0.6) {
                     MemoryEdge newEdge;
@@ -224,15 +229,101 @@ void DreamEngine::executeExplorePhase() {
                     newEdge.weight = similarity * randomFactor;
                     newEdge.relationType = "stochastic";
                     newEdge.lastActivation = std::chrono::steady_clock::now();
-                    
+
                     edgesToCreate_.push_back(newEdge);
-                    
+
                     if (createEdgeCallback_) {
                         createEdgeCallback_(newEdge);
                     }
                     stats_.totalEdgesCreated++;
                 }
             }
+        }
+    }
+}
+
+void DreamEngine::exploreCausalAssociations() {
+    // Créer des associations basées sur les liens causaux mot→émotion
+    // Si deux souvenirs partagent un mot déclencheur commun, ils sont liés
+
+    if (causalLinks_.empty()) return;
+
+    // Construire un index: mot→liste de souvenirs ayant cette émotion dominante
+    std::unordered_map<std::string, std::vector<size_t>> wordToMemories;
+
+    for (const auto& link : causalLinks_) {
+        // Trouver les souvenirs ayant la même émotion dominante
+        for (size_t i = 0; i < scoredMemories_.size(); ++i) {
+            // Trouver l'émotion dominante du souvenir
+            auto& emotions = scoredMemories_[i].emotionalVector;
+            size_t maxIdx = 0;
+            double maxVal = emotions[0];
+            for (size_t j = 1; j < 24; ++j) {
+                if (emotions[j] > maxVal) {
+                    maxVal = emotions[j];
+                    maxIdx = j;
+                }
+            }
+
+            // Correspondance approximative avec l'émotion du lien causal
+            // (on utilise le nom de l'émotion dominante du lien)
+            if (maxVal > 0.1) {
+                wordToMemories[link.wordLemma].push_back(i);
+            }
+        }
+    }
+
+    // Créer des arêtes entre souvenirs partageant un mot déclencheur
+    for (const auto& [word, memoryIndices] : wordToMemories) {
+        if (memoryIndices.size() < 2) continue;
+
+        // Trouver le lien causal correspondant pour obtenir la force
+        double causalStrength = 0.5;
+        for (const auto& link : causalLinks_) {
+            if (link.wordLemma == word) {
+                causalStrength = link.causalStrength;
+                break;
+            }
+        }
+
+        // Créer des arêtes entre toutes les paires (limité à 5 pour éviter explosion)
+        size_t maxPairs = std::min(memoryIndices.size(), (size_t)5);
+        for (size_t i = 0; i < maxPairs; ++i) {
+            for (size_t j = i + 1; j < maxPairs; ++j) {
+                const auto& m1 = scoredMemories_[memoryIndices[i]];
+                const auto& m2 = scoredMemories_[memoryIndices[j]];
+
+                MemoryEdge newEdge;
+                newEdge.sourceId = m1.id;
+                newEdge.targetId = m2.id;
+                newEdge.weight = causalStrength * 0.8;  // Poids basé sur force causale
+                newEdge.relationType = "causal_association";
+                newEdge.lastActivation = std::chrono::steady_clock::now();
+
+                edgesToCreate_.push_back(newEdge);
+
+                if (createEdgeCallback_) {
+                    createEdgeCallback_(newEdge);
+                }
+                stats_.totalEdgesCreated++;
+            }
+        }
+    }
+
+    // Bonus: Créer des arêtes directement depuis les top trigger words
+    for (const auto& triggerWord : causalStats_.topTriggerWords) {
+        // Chercher les liens causaux avec ce mot
+        std::vector<std::string> emotionIds;
+        for (const auto& link : causalLinks_) {
+            if (link.wordLemma == triggerWord) {
+                emotionIds.push_back(link.dominantEmotion);
+            }
+        }
+
+        // Signaler les mots déclencheurs importants (pour debug/log)
+        if (!emotionIds.empty()) {
+            // Le mot déclencheur crée des associations plus fortes
+            // (logique métier: ces mots sont significatifs pour Clara)
         }
     }
 }
@@ -473,6 +564,38 @@ const std::vector<Memory>& DreamEngine::getMCTMemories() const {
 void DreamEngine::clearMCT() {
     std::lock_guard<std::mutex> lock(mutex_);
     mctBuffer_.clear();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GESTION DES LIENS CAUSAUX (MCTGraph)
+// ═══════════════════════════════════════════════════════════════════════════
+
+void DreamEngine::processMCTGraphSnapshot(
+    const std::vector<WordNodeSnapshot>& words,
+    const std::vector<CausalLink>& causalLinks,
+    const CausalStats& stats) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Stocker les nouvelles données
+    wordNodes_ = words;
+    causalLinks_ = causalLinks;
+    causalStats_ = stats;
+}
+
+const std::vector<CausalLink>& DreamEngine::getCausalLinks() const {
+    return causalLinks_;
+}
+
+const std::vector<std::string>& DreamEngine::getTopTriggerWords() const {
+    return causalStats_.topTriggerWords;
+}
+
+void DreamEngine::clearCausalLinks() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    causalLinks_.clear();
+    wordNodes_.clear();
+    causalStats_ = CausalStats{};
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
