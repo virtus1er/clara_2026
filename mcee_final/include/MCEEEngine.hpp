@@ -16,6 +16,7 @@
 
 #include "Types.hpp"
 #include "MCT.hpp"
+#include "MCTGraph.hpp"
 #include "MLT.hpp"
 #include "PatternMatcher.hpp"
 #include "PhaseDetector.hpp"
@@ -53,10 +54,18 @@ struct RabbitMQConfig {
     // Entrée parole (depuis module speech)
     std::string speech_exchange = "mcee.speech.input";
     std::string speech_routing_key = "speech.text";
-    
+
+    // Entrée tokens Neo4j/spaCy (pour MCTGraph)
+    std::string tokens_exchange = "neo4j.tokens.output";
+    std::string tokens_routing_key = "tokens.extracted";
+
     // Sortie état MCEE
     std::string output_exchange = "mcee.emotional.output";
     std::string output_routing_key = "mcee.state";
+
+    // Sortie snapshots MCTGraph (vers module rêves)
+    std::string snapshot_exchange = "mcee.mct.snapshot";
+    std::string snapshot_routing_key = "mct.graph";
 };
 
 /**
@@ -207,6 +216,11 @@ public:
     std::shared_ptr<PatternMatcher> getPatternMatcher() { return pattern_matcher_; }
 
     /**
+     * @brief Retourne le MCTGraph (graphe relationnel mots-émotions)
+     */
+    std::shared_ptr<MCTGraph> getMCTGraph() { return mct_graph_; }
+
+    /**
      * @brief Envoie un feedback sur le pattern actuel
      * @param feedback Score [-1, 1]
      */
@@ -228,9 +242,13 @@ private:
 
     // Nouveau système MCT/MLT (v3)
     std::shared_ptr<MCT> mct_;
+    std::shared_ptr<MCTGraph> mct_graph_;  // Graphe relationnel mots-émotions
     std::shared_ptr<MLT> mlt_;
     std::shared_ptr<PatternMatcher> pattern_matcher_;
     MatchResult current_match_;
+
+    // ID de la dernière émotion ajoutée (pour liaison avec mots)
+    std::string last_emotion_node_id_;
 
     // Composants legacy (pour compatibilité)
     PhaseDetector phase_detector_;
@@ -251,11 +269,14 @@ private:
     AmqpClient::Channel::ptr_t channel_;
     std::string emotions_consumer_tag_;
     std::string speech_consumer_tag_;
+    std::string tokens_consumer_tag_;
 
     // Threading
     std::atomic<bool> running_{false};
     std::thread emotions_consumer_thread_;
     std::thread speech_consumer_thread_;
+    std::thread tokens_consumer_thread_;
+    std::thread snapshot_timer_thread_;
     std::mutex state_mutex_;
     StateCallback on_state_change_;
 
@@ -284,6 +305,16 @@ private:
     void speechConsumeLoop();
 
     /**
+     * @brief Boucle de consommation des tokens Neo4j/spaCy
+     */
+    void tokensConsumeLoop();
+
+    /**
+     * @brief Boucle du timer pour export snapshots MCTGraph
+     */
+    void snapshotTimerLoop();
+
+    /**
      * @brief Traite un message d'émotion RabbitMQ
      * @param body Corps du message (JSON)
      */
@@ -294,6 +325,17 @@ private:
      * @param body Corps du message (JSON)
      */
     void handleSpeechMessage(const std::string& body);
+
+    /**
+     * @brief Traite un message de tokens Neo4j/spaCy
+     * @param body Corps du message (JSON)
+     */
+    void handleTokensMessage(const std::string& body);
+
+    /**
+     * @brief Publie un snapshot MCTGraph vers le module rêves
+     */
+    void publishSnapshot(const MCTGraphSnapshot& snapshot);
 
     /**
      * @brief Pipeline de traitement MCEE v3 complet

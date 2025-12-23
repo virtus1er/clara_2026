@@ -75,7 +75,30 @@ void MCEEEngine::initMemorySystem() {
     mct_config.decay_factor = 0.95;
     mct_config.min_samples_for_signature = 5;
     mct_ = std::make_shared<MCT>(mct_config);
-    
+
+    // Créer le MCTGraph (graphe relationnel mots-émotions)
+    MCTGraphConfig graph_config;
+    graph_config.time_window_seconds = 120.0;  // 2 minutes
+    graph_config.emotion_persistence_threshold_seconds = 2.0;
+    graph_config.causality_threshold_ms = 500.0;
+    graph_config.slow_emotion_causality_threshold_ms = 800.0;
+    graph_config.snapshot_interval_seconds = 10.0;
+    mct_graph_ = std::make_shared<MCTGraph>(graph_config);
+
+    // Configurer le callback de snapshot
+    mct_graph_->setSnapshotCallback([this](const MCTGraphSnapshot& snapshot) {
+        publishSnapshot(snapshot);
+    });
+
+    // Configurer le callback de détection causale
+    mct_graph_->setCausalDetectionCallback(
+        [](const std::string& word_id, const std::string& emotion_id, double strength) {
+            std::cout << "[MCTGraph] Causalité détectée: " << word_id
+                      << " → " << emotion_id << " (force="
+                      << std::fixed << std::setprecision(2) << strength << ")\n";
+        }
+    );
+
     // Créer la MLT avec les patterns de base
     MLTConfig mlt_config;
     mlt_config.min_similarity_threshold = 0.6;
@@ -83,7 +106,7 @@ void MCEEEngine::initMemorySystem() {
     mlt_config.learning_rate = 0.1;
     mlt_config.max_patterns = 100;
     mlt_ = std::make_shared<MLT>(mlt_config);
-    
+
     // Créer le PatternMatcher
     PatternMatcherConfig pm_config;
     pm_config.high_match_threshold = 0.85;
@@ -93,8 +116,9 @@ void MCEEEngine::initMemorySystem() {
     pm_config.min_frames_before_switch = 3;
     pm_config.verbose_logging = true;
     pattern_matcher_ = std::make_shared<PatternMatcher>(mct_, mlt_, pm_config);
-    
+
     std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
+    std::cout << "[MCEEEngine] MCTGraph: fenêtre=" << graph_config.time_window_seconds << "s\n";
     std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
 }
 
@@ -170,16 +194,22 @@ bool MCEEEngine::start() {
     }
 
     running_.store(true);
-    
+
     // Démarrer les threads de consommation
     emotions_consumer_thread_ = std::thread(&MCEEEngine::emotionsConsumeLoop, this);
     speech_consumer_thread_ = std::thread(&MCEEEngine::speechConsumeLoop, this);
+    tokens_consumer_thread_ = std::thread(&MCEEEngine::tokensConsumeLoop, this);
+    snapshot_timer_thread_ = std::thread(&MCEEEngine::snapshotTimerLoop, this);
 
     std::cout << "[MCEEEngine] ✓ Démarré et en attente de messages RabbitMQ\n";
-    std::cout << "[MCEEEngine] Émotions: " << rabbitmq_config_.emotions_exchange 
+    std::cout << "[MCEEEngine] Émotions: " << rabbitmq_config_.emotions_exchange
               << " / " << rabbitmq_config_.emotions_routing_key << "\n";
-    std::cout << "[MCEEEngine] Parole: " << rabbitmq_config_.speech_exchange 
-              << " / " << rabbitmq_config_.speech_routing_key << "\n\n";
+    std::cout << "[MCEEEngine] Parole: " << rabbitmq_config_.speech_exchange
+              << " / " << rabbitmq_config_.speech_routing_key << "\n";
+    std::cout << "[MCEEEngine] Tokens: " << rabbitmq_config_.tokens_exchange
+              << " / " << rabbitmq_config_.tokens_routing_key << "\n";
+    std::cout << "[MCEEEngine] MCTGraph snapshot interval: "
+              << mct_graph_->getConfig().snapshot_interval_seconds << "s\n\n";
 
     return true;
 }
@@ -194,9 +224,17 @@ void MCEEEngine::stop() {
     if (emotions_consumer_thread_.joinable()) {
         emotions_consumer_thread_.join();
     }
-    
+
     if (speech_consumer_thread_.joinable()) {
         speech_consumer_thread_.join();
+    }
+
+    if (tokens_consumer_thread_.joinable()) {
+        tokens_consumer_thread_.join();
+    }
+
+    if (snapshot_timer_thread_.joinable()) {
+        snapshot_timer_thread_.join();
     }
 
     std::cout << "[MCEEEngine] Arrêté\n";
@@ -206,8 +244,15 @@ void MCEEEngine::stop() {
     std::cout << "  - Souvenirs créés: " << memory_manager_.getMemoryCount() << "\n";
     std::cout << "  - Traumas: " << memory_manager_.getTraumaCount() << "\n";
     std::cout << "  - Textes traités: " << speech_input_.getProcessedCount() << "\n";
-    std::cout << "  - Sentiment moyen: " << std::fixed << std::setprecision(2) 
+    std::cout << "  - Sentiment moyen: " << std::fixed << std::setprecision(2)
               << speech_input_.getAverageSentiment() << "\n";
+
+    // Statistiques MCTGraph
+    if (mct_graph_) {
+        std::cout << "  - MCTGraph mots: " << mct_graph_->getWordCount() << "\n";
+        std::cout << "  - MCTGraph émotions: " << mct_graph_->getEmotionCount() << "\n";
+        std::cout << "  - MCTGraph arêtes causales: " << mct_graph_->getCausalEdgeCount() << "\n";
+    }
 }
 
 bool MCEEEngine::initRabbitMQ() {
@@ -273,8 +318,34 @@ bool MCEEEngine::initRabbitMQ() {
             speech_queue, "", true, false, false, 1
         );
 
+        // Exchange et queue pour les tokens Neo4j/spaCy
+        channel_->DeclareExchange(
+            rabbitmq_config_.tokens_exchange,
+            AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
+            false, true, false
+        );
+        std::string tokens_queue = channel_->DeclareQueue(
+            "mcee_tokens_queue", false, true, false, false
+        );
+        channel_->BindQueue(
+            tokens_queue,
+            rabbitmq_config_.tokens_exchange,
+            rabbitmq_config_.tokens_routing_key
+        );
+        tokens_consumer_tag_ = channel_->BasicConsume(
+            tokens_queue, "", true, false, false, 1
+        );
+
+        // Exchange pour les snapshots MCTGraph (sortie vers module rêves)
+        channel_->DeclareExchange(
+            rabbitmq_config_.snapshot_exchange,
+            AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
+            false, true, false
+        );
+
         std::cout << "[MCEEEngine] Connexion RabbitMQ établie\n";
-        std::cout << "[MCEEEngine] Queues créées: emotions + speech\n";
+        std::cout << "[MCEEEngine] Queues créées: emotions + speech + tokens\n";
+        std::cout << "[MCEEEngine] Exchange snapshot: " << rabbitmq_config_.snapshot_exchange << "\n";
         return true;
 
     } catch (const std::exception& e) {
@@ -423,12 +494,31 @@ void MCEEEngine::processSpeechText(const std::string& text, const std::string& s
 
 void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& raw_emotions) {
     // ═══════════════════════════════════════════════════════════════════════
-    // PIPELINE V3.0 : MCT → PatternMatcher → MLT
+    // PIPELINE V3.0 : MCT → PatternMatcher → MLT → MCTGraph
     // ═══════════════════════════════════════════════════════════════════════
-    
+
     // 1. AJOUTER L'ÉTAT À LA MCT
     pushToMCT(current_state_);
-    
+
+    // 1b. AJOUTER L'ÉTAT AU MCTGRAPH (graphe relationnel)
+    if (mct_graph_) {
+        // Calculer la persistance estimée (basée sur l'intensité)
+        double persistence = current_state_.getMeanIntensity() * 5.0;  // 0-5 secondes
+        if (persistence >= mct_graph_->getConfig().emotion_persistence_threshold_seconds) {
+            last_emotion_node_id_ = mct_graph_->addEmotionWithContext(
+                current_state_,
+                persistence,
+                current_state_.getValence(),
+                current_state_.getMeanIntensity()
+            );
+
+            // Détecter automatiquement les liens causaux avec les mots récents
+            if (!last_emotion_node_id_.empty()) {
+                mct_graph_->detectCausality(last_emotion_node_id_);
+            }
+        }
+    }
+
     // 2. IDENTIFIER LE PATTERN VIA PatternMatcher
     MatchResult match = identifyPattern();
     
@@ -557,9 +647,16 @@ void MCEEEngine::printState() const {
     
     // Afficher métriques MCT si disponible
     if (mct_ && !mct_->empty()) {
-        std::cout << "  MCT       : size=" << mct_->size() 
+        std::cout << "  MCT       : size=" << mct_->size()
                   << ", stability=" << std::fixed << std::setprecision(2) << mct_->getStability()
                   << ", trend=" << mct_->getTrend() << "\n";
+    }
+
+    // Afficher métriques MCTGraph si disponible
+    if (mct_graph_ && (mct_graph_->getWordCount() > 0 || mct_graph_->getEmotionCount() > 0)) {
+        std::cout << "  MCTGraph  : " << mct_graph_->getWordCount() << " mots, "
+                  << mct_graph_->getEmotionCount() << " émotions, "
+                  << mct_graph_->getCausalEdgeCount() << " liens causaux\n";
     }
     std::cout << "\n";
 }
@@ -611,6 +708,15 @@ void MCEEEngine::publishState() {
             output["mct"]["stability"] = mct_->getStability();
             output["mct"]["volatility"] = mct_->getVolatility();
             output["mct"]["trend"] = mct_->getTrend();
+        }
+
+        // Métriques MCTGraph (graphe relationnel)
+        if (mct_graph_) {
+            output["mct_graph"]["word_count"] = mct_graph_->getWordCount();
+            output["mct_graph"]["emotion_count"] = mct_graph_->getEmotionCount();
+            output["mct_graph"]["edge_count"] = mct_graph_->getEdgeCount();
+            output["mct_graph"]["causal_edge_count"] = mct_graph_->getCausalEdgeCount();
+            output["mct_graph"]["density"] = mct_graph_->getGraphDensity();
         }
 
         // Statistiques
@@ -914,6 +1020,149 @@ void MCEEEngine::runLearning() {
     if (!mlt_) return;
     mlt_->runLearningPass();
     std::cout << "[MCEEEngine] Passe d'apprentissage MLT terminée\n";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MCTGRAPH INTEGRATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+void MCEEEngine::tokensConsumeLoop() {
+    std::cout << "[MCEEEngine] Boucle de consommation des tokens démarrée\n";
+
+    while (running_.load()) {
+        try {
+            AmqpClient::Envelope::ptr_t envelope;
+            bool received = channel_->BasicConsumeMessage(tokens_consumer_tag_, envelope, 500);
+
+            if (received && envelope) {
+                std::string body(envelope->Message()->Body().begin(),
+                                envelope->Message()->Body().end());
+
+                handleTokensMessage(body);
+                channel_->BasicAck(envelope);
+            }
+
+        } catch (const std::exception& e) {
+            std::cerr << "[MCEEEngine] Erreur consommation tokens: " << e.what() << "\n";
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+}
+
+void MCEEEngine::snapshotTimerLoop() {
+    std::cout << "[MCEEEngine] Timer snapshot MCTGraph démarré\n";
+
+    while (running_.load()) {
+        // Attendre l'intervalle configuré
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        if (!running_.load()) break;
+
+        // Déclencher le snapshot si l'intervalle est atteint
+        if (mct_graph_) {
+            mct_graph_->triggerSnapshot();
+
+            // Maintenance périodique du graphe
+            mct_graph_->pruneExpiredNodes();
+            mct_graph_->applyEdgeDecay();
+        }
+    }
+}
+
+void MCEEEngine::handleTokensMessage(const std::string& body) {
+    if (!mct_graph_) return;
+
+    try {
+        json input = json::parse(body);
+
+        // Format attendu :
+        // {
+        //   "sentence_id": "...",
+        //   "tokens": [
+        //     {"text": "...", "lemma": "...", "pos": "NOUN", "sentiment": 0.5},
+        //     ...
+        //   ],
+        //   "relations": [
+        //     {"source": 0, "target": 1, "type": "nsubj"},
+        //     ...
+        //   ]
+        // }
+
+        std::string sentence_id = input.value("sentence_id", "");
+        std::vector<std::string> word_ids;
+
+        // Ajouter les tokens au graphe
+        if (input.contains("tokens") && input["tokens"].is_array()) {
+            for (const auto& token : input["tokens"]) {
+                std::string lemma = token.value("lemma", token.value("text", ""));
+                std::string pos = token.value("pos", "UNKNOWN");
+                std::string original = token.value("text", lemma);
+
+                std::string word_id = mct_graph_->addWord(lemma, pos, sentence_id, original);
+                word_ids.push_back(word_id);
+
+                // Détecter les co-occurrences temporelles
+                mct_graph_->detectTemporalCooccurrences(word_id);
+
+                // Détecter la causalité avec la dernière émotion
+                if (!last_emotion_node_id_.empty()) {
+                    mct_graph_->detectCausality(last_emotion_node_id_);
+                }
+            }
+        }
+
+        // Ajouter les relations sémantiques
+        if (input.contains("relations") && input["relations"].is_array()) {
+            for (const auto& rel : input["relations"]) {
+                size_t source_idx = rel.value("source", size_t(0));
+                size_t target_idx = rel.value("target", size_t(0));
+                std::string rel_type = rel.value("type", "related");
+
+                if (source_idx < word_ids.size() && target_idx < word_ids.size()) {
+                    mct_graph_->addSemanticEdge(
+                        word_ids[source_idx],
+                        word_ids[target_idx],
+                        rel_type
+                    );
+                }
+            }
+        }
+
+        std::cout << "[MCEEEngine] Tokens traités: " << word_ids.size()
+                  << " mots ajoutés au MCTGraph\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "[MCEEEngine] Erreur parsing JSON tokens: " << e.what() << "\n";
+    }
+}
+
+void MCEEEngine::publishSnapshot(const MCTGraphSnapshot& snapshot) {
+    if (!channel_) return;
+
+    try {
+        json output = snapshot.toJson();
+
+        // Ajouter des métadonnées
+        output["source"] = "mcee";
+        output["pattern"] = current_match_.pattern_name;
+        output["pattern_confidence"] = current_match_.confidence;
+
+        std::string body = output.dump();
+        channel_->BasicPublish(
+            rabbitmq_config_.snapshot_exchange,
+            rabbitmq_config_.snapshot_routing_key,
+            AmqpClient::BasicMessage::Create(body),
+            false, false
+        );
+
+        std::cout << "[MCEEEngine] Snapshot MCTGraph publié: "
+                  << snapshot.stats.total_words << " mots, "
+                  << snapshot.stats.total_emotions << " émotions, "
+                  << snapshot.stats.causal_edges << " liens causaux\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "[MCEEEngine] Erreur publication snapshot: " << e.what() << "\n";
+    }
 }
 
 } // namespace mcee
