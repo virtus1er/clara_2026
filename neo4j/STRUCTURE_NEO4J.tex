@@ -1,0 +1,723 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================================
+% PACKAGES
+% ============================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
+
+% ============================================================================
+% CONFIGURATION
+% ============================================================================
+\geometry{margin=2.5cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black,
+    citecolor=blue!60!black
+}
+
+% Couleurs personnalisées
+\definecolor{codebackground}{RGB}{245, 245, 245}
+\definecolor{codeborder}{RGB}{200, 200, 200}
+\definecolor{cypherkey}{RGB}{0, 102, 153}
+\definecolor{cypherstring}{RGB}{163, 21, 21}
+\definecolor{cyphercomment}{RGB}{0, 128, 0}
+\definecolor{nodecolor}{RGB}{66, 133, 244}
+\definecolor{relationcolor}{RGB}{234, 67, 53}
+\definecolor{memorycolor}{RGB}{52, 168, 83}
+\definecolor{conceptcolor}{RGB}{251, 188, 5}
+\definecolor{sessioncolor}{RGB}{154, 160, 166}
+
+% Configuration listings pour Cypher
+\lstdefinelanguage{Cypher}{
+    keywords={MATCH, CREATE, MERGE, SET, RETURN, WHERE, WITH, ORDER, BY, LIMIT, DELETE, REMOVE, ON, AND, OR, NOT, AS, IN, IS, NULL, TRUE, FALSE, CASE, WHEN, THEN, ELSE, END, OPTIONAL, UNWIND, FOREACH, CALL, YIELD, DETACH, EXISTS, COUNT, SUM, AVG, MIN, MAX, COLLECT, DISTINCT, DESC, ASC, INDEX, FOR, IF},
+    keywordstyle=\color{cypherkey}\bfseries,
+    sensitive=true,
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    commentstyle=\color{cyphercomment}\itshape,
+    stringstyle=\color{cypherstring},
+    morestring=[b]',
+    morestring=[b]"
+}
+
+\lstset{
+    language=Cypher,
+    backgroundcolor=\color{codebackground},
+    frame=single,
+    rulecolor=\color{codeborder},
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4,
+    showstringspaces=false,
+    numbers=none,
+    xleftmargin=0.5cm,
+    xrightmargin=0.5cm,
+    aboveskip=0.5cm,
+    belowskip=0.5cm
+}
+
+% Configuration pour JSON
+\lstdefinelanguage{JSON}{
+    morestring=[b]",
+    stringstyle=\color{cypherstring},
+    literate=
+        *{:}{{{\color{black}:}}}{1}
+        {,}{{{\color{black},}}}{1}
+        {\{}{{{\color{black}\{}}}{1}
+        {\}}{{{\color{black}\}}}}{1}
+        {[}{{{\color{black}[}}}{1}
+        {]}{{{\color{black}]}}}{1}
+}
+
+% En-têtes et pieds de page
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{MCEE - Neo4j}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Formatage des titres
+\titleformat{\section}
+    {\normalfont\Large\bfseries\color{nodecolor}}
+    {\thesection}{1em}{}
+\titleformat{\subsection}
+    {\normalfont\large\bfseries\color{nodecolor!80!black}}
+    {\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+    {\normalfont\normalsize\bfseries\color{nodecolor!60!black}}
+    {\thesubsubsection}{1em}{}
+
+% Boîtes colorées
+\tcbuselibrary{skins, breakable}
+
+\newtcolorbox{notebox}{
+    colback=blue!5,
+    colframe=blue!50!black,
+    fonttitle=\bfseries,
+    title={Note:},
+    breakable
+}
+
+\newtcolorbox{warningbox}{
+    colback=orange!5,
+    colframe=orange!50!black,
+    fonttitle=\bfseries,
+    title={Important:},
+    breakable
+}
+
+\newtcolorbox{nodebox}[1]{
+    colback=nodecolor!5,
+    colframe=nodecolor,
+    fonttitle=\bfseries,
+    title={#1},
+    breakable
+}
+
+% ============================================================================
+% DOCUMENT
+% ============================================================================
+\begin{document}
+
+% Page de titre
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries Structure Neo4j\par}
+    \vspace{0.5cm}
+    {\Large\itshape MCEE - Modèle Complet d'Évaluation des États\par}
+    
+    \vspace{2cm}
+    
+    \begin{tikzpicture}[
+        node distance=2cm,
+        every node/.style={font=\sffamily},
+        memory/.style={rectangle, rounded corners, draw=memorycolor, fill=memorycolor!20, minimum width=3cm, minimum height=1cm, thick},
+        concept/.style={rectangle, rounded corners, draw=conceptcolor, fill=conceptcolor!20, minimum width=2.5cm, minimum height=1cm, thick},
+        session/.style={rectangle, rounded corners, draw=sessioncolor, fill=sessioncolor!20, minimum width=2.5cm, minimum height=1cm, thick},
+        relation/.style={-{Stealth[length=3mm]}, thick, relationcolor}
+    ]
+        \node[memory] (mem) {Memory};
+        \node[concept, right=of mem] (con1) {Concept};
+        \node[concept, right=of con1] (con2) {Concept};
+        \node[session, below=of mem] (ses) {Session};
+        
+        \draw[relation] (mem) -- node[above, font=\small] {EVOQUE} (con1);
+        \draw[relation] (con1) -- node[above, font=\small] {SEMANTIQUE} (con2);
+        \draw[relation] (ses) -- node[left, font=\small] {CONTAINS} (mem);
+    \end{tikzpicture}
+    
+    \vspace{2cm}
+    
+    {\large Version 3.1\par}
+    {\large Architecture simplifiée - 24 émotions\par}
+    
+    \vfill
+    
+    {\large Documentation technique\par}
+    {\large \today\par}
+\end{titlepage}
+
+% Table des matières
+\tableofcontents
+\newpage
+
+% ============================================================================
+\section{Vue d'ensemble}
+% ============================================================================
+
+Le système utilise Neo4j comme base de données graphe pour stocker les mémoires émotionnelles, les concepts sémantiques et leurs relations.
+
+\subsection{Philosophie de conception}
+
+L'architecture v3.1 abandonne les patterns statiques (SERENITE, ANXIETE, etc.) au profit d'un système basé sur \textbf{24 émotions continues}. Cette approche permet :
+
+\begin{itemize}
+    \item \textbf{Nuances émotionnelles} -- La peur à 0.3 + anxiété à 0.4 vs terreur à 0.9 + horreur à 0.8
+    \item \textbf{Combinaisons naturelles} -- Joie + nostalgie + admiration simultanées
+    \item \textbf{Évolution temporelle} -- Suivi des changements par \texttt{sentence\_id}
+\end{itemize}
+
+\subsection{Architecture mémoire}
+
+\begin{center}
+\begin{tikzpicture}[
+    node distance=1.5cm and 2.5cm,
+    every node/.style={font=\sffamily\small},
+    memory/.style={rectangle, rounded corners, draw=memorycolor, fill=memorycolor!20, minimum width=2.2cm, minimum height=0.8cm, thick},
+    concept/.style={rectangle, rounded corners, draw=conceptcolor, fill=conceptcolor!20, minimum width=2.2cm, minimum height=0.8cm, thick},
+    session/.style={rectangle, rounded corners, draw=sessioncolor, fill=sessioncolor!20, minimum width=2.2cm, minimum height=0.8cm, thick},
+    relation/.style={-{Stealth[length=2.5mm]}, thick},
+    label/.style={font=\sffamily\scriptsize, above, sloped}
+]
+    % Nodes
+    \node[memory] (mem) {Memory};
+    \node[concept, right=of mem] (con1) {Concept};
+    \node[concept, right=of con1] (con2) {Concept};
+    \node[session, below=of mem] (ses) {Session};
+    \node[memory, below=of ses] (trauma) {Trauma};
+    
+    % Relations
+    \draw[relation, memorycolor] (mem) -- node[label] {EVOQUE} (con1);
+    \draw[relation, conceptcolor] (con1) -- node[label] {SEMANTIQUE} (con2);
+    \draw[relation, sessioncolor] (ses) -- node[label, left] {CONTAINS} (mem);
+    \draw[relation, red!70] (trauma) -- node[label, below] {TRIGGERS} (con1);
+\end{tikzpicture}
+\end{center}
+
+% ============================================================================
+\section{Nœuds (Nodes)}
+% ============================================================================
+
+\subsection{Memory}
+
+Représente un souvenir/mémoire avec son contexte émotionnel complet.
+
+\begin{nodebox}{Memory Node}
+\begin{lstlisting}
+(:Memory {
+    id: String,                    -- Identifiant unique
+    
+    -- Emotions (24 dimensions)
+    emotional_states: String,      -- JSON: {"sentence_id": [24 floats]}
+    dominant: String,              -- Emotion dominante
+    intensity: Float,              -- Intensite [0.0 - 1.0]
+    valence: Float,                -- Valence [-1.0 a 1.0]
+    
+    -- Metadonnees
+    weight: Float,                 -- Poids/importance [0.0 - 1.0]
+    context: String,               -- Texte du contexte
+    category: String,              -- Categorie semantique
+    keywords: [String],            -- Mots-cles extraits
+    
+    -- Classification memoire
+    type: String,                  -- "MCT" | "MLT" | "Episodic" | "Semantic"
+    consolidated: Boolean,         -- True si consolide en MLT
+    active: Boolean,               -- True si actif
+    
+    -- Statistiques
+    activation_count: Integer,     -- Nombre de reactivations
+    
+    -- Timestamps
+    created_at: DateTime,
+    updated_at: DateTime,
+    last_accessed: DateTime
+})
+\end{lstlisting}
+\end{nodebox}
+
+\subsubsection{Labels additionnels}
+
+\begin{itemize}
+    \item \texttt{:Trauma} -- Pour les mémoires traumatiques (weight $\geq$ 0.3)
+    \item \texttt{:MCT} -- Mémoire à Court Terme
+    \item \texttt{:MLT} -- Mémoire à Long Terme
+    \item \texttt{:Archived} -- Mémoire archivée
+\end{itemize}
+
+\subsubsection{Format emotional\_states}
+
+Les états émotionnels sont stockés en JSON string avec le \texttt{sentence\_id} comme clé :
+
+\begin{lstlisting}[language=JSON]
+{
+    "1": [0.8, 0.24, 0.16, 0.0, 0.0, ...],
+    "4": [0.1, 0.7, 0.21, 0.0, 0.0, ...],
+    "7": [0.0, 0.0, 0.0, 0.9, 0.27, ...]
+}
+\end{lstlisting}
+
+\subsubsection{Les 24 émotions}
+
+\begin{center}
+\begin{tabular}{clclcl}
+\toprule
+\textbf{Index} & \textbf{Émotion} & \textbf{Index} & \textbf{Émotion} & \textbf{Index} & \textbf{Émotion} \\
+\midrule
+0 & Joie & 8 & Calme & 16 & Triomphe \\
+1 & Confiance & 9 & Intérêt & 17 & Admiration \\
+2 & Peur & 10 & Fascination & 18 & Adoration \\
+3 & Surprise & 11 & Confusion & 19 & Amusement \\
+4 & Tristesse & 12 & Ennui & 20 & Anxiété \\
+5 & Dégoût & 13 & Gêne & 21 & Émerveillement \\
+6 & Horreur & 14 & Excitation & 22 & Nostalgie \\
+7 & Douleur emp. & 15 & Soulagement & 23 & Satisfaction \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{notebox}
+Les 24 émotions permettent de capturer des nuances fines. Par exemple, "peur légère" = Peur(0.3) + Anxiété(0.4), tandis que "terreur" = Peur(0.9) + Horreur(0.8) + Tristesse(0.5).
+\end{notebox}
+
+\subsection{Trauma}
+
+Extension de Memory pour les souvenirs traumatiques.
+
+\begin{nodebox}{Trauma Node}
+\begin{lstlisting}
+(:Memory:Trauma {
+    -- Herite de toutes les proprietes Memory
+    id: String,
+    emotional_states: String,
+    ...
+    
+    -- Proprietes specifiques Trauma
+    trauma: Boolean,               -- Toujours true
+    triggers: [String],            -- Mots/concepts declencheurs
+    protection_level: Float        -- Niveau de protection [0.0 - 1.0]
+    
+    -- Note: weight a un plancher (floor) de 0.3
+})
+\end{lstlisting}
+\end{nodebox}
+
+\subsection{Concept}
+
+Représente un concept sémantique extrait des mémoires.
+
+\begin{nodebox}{Concept Node}
+\begin{lstlisting}
+(:Concept {
+    name: String,                  -- Nom du concept (minuscules)
+    
+    -- Emotions accumulees
+    emotional_states: String,      -- JSON: {"sentence_id": [24 floats]}
+    
+    -- References
+    memory_ids: [String],          -- Liste des IDs de memoires liees
+    
+    -- Timestamps
+    created_at: DateTime,
+    updated_at: DateTime
+})
+\end{lstlisting}
+\end{nodebox}
+
+\begin{notebox}
+Les \texttt{emotional\_states} d'un Concept accumulent les états de toutes les mémoires qui l'évoquent, permettant une analyse de l'évolution émotionnelle du concept dans le temps.
+\end{notebox}
+
+\subsection{Session}
+
+Représente une session d'interaction.
+
+\begin{nodebox}{Session Node}
+\begin{lstlisting}
+(:Session:MCT {
+    id: String,                    -- Identifiant unique
+    
+    -- Metriques emotionnelles
+    stability: Float,              -- Stabilite [0.0 - 1.0]
+    volatility: Float,             -- Volatilite [0.0 - 1.0]
+    trend: String,                 -- "stable" | "ascending" | "descending"
+    state_count: Integer,          -- Nombre d'etats enregistres
+    
+    -- Timestamps
+    created_at: DateTime,
+    updated_at: DateTime
+})
+\end{lstlisting}
+\end{nodebox}
+
+\subsection{EmotionalState}
+
+État émotionnel ponctuel (lié à une Session).
+
+\begin{nodebox}{EmotionalState Node}
+\begin{lstlisting}
+(:EmotionalState {
+    emotions: [Float],             -- 24 valeurs d'emotions
+    dominant: String,              -- Emotion dominante
+    intensity: Float,              -- Intensite
+    valence: Float,                -- Valence
+    timestamp: DateTime            -- Moment de l'enregistrement
+})
+\end{lstlisting}
+\end{nodebox}
+
+% ============================================================================
+\section{Relations}
+% ============================================================================
+
+\subsection{EVOQUE}
+
+Lie une mémoire aux concepts qu'elle évoque.
+
+\begin{lstlisting}
+(:Memory)-[:EVOQUE]->(:Concept)
+\end{lstlisting}
+
+\textbf{Propriétés :} Aucune (relation simple)
+
+\subsection{SEMANTIQUE}
+
+Relation sémantique entre deux concepts.
+
+\begin{lstlisting}
+(:Concept)-[:SEMANTIQUE {
+    type: String,                  -- Type de relation
+    count: Integer,                -- Nombre d'occurrences
+    memory_ids: [String],          -- Memoires source
+    emotional_states: String       -- JSON des etats emotionnels
+}]->(:Concept)
+\end{lstlisting}
+
+\subsubsection{Types de relations sémantiques}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Type} & \textbf{Description} & \textbf{Exemple} \\
+\midrule
+\texttt{EST} & Attribution/Identité & "chat" $\rightarrow$ "noir" \\
+\texttt{UTILISE} & Action/Utilisation & "chat" $\rightarrow$ "dort" \\
+\texttt{LOCALISE} & Localisation & "chat" $\rightarrow$ "canapé" \\
+\texttt{MODIFIE} & Modification/Adverbe & "paisiblement" $\rightarrow$ "dort" \\
+\texttt{POSSEDE} & Possession & "marie" $\rightarrow$ "chat" \\
+\texttt{CAUSE} & Causalité & "pluie" $\rightarrow$ "tristesse" \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{ASSOCIE\_A}
+
+Association générique entre Memory et Concept.
+
+\begin{lstlisting}
+(:Memory)-[:ASSOCIE_A {
+    strength: Float,               -- Force de l'association [0.0 - 1.0]
+    created_at: DateTime
+}]->(:Concept)
+\end{lstlisting}
+
+\subsection{CONTAINS}
+
+Lie une session à ses états émotionnels.
+
+\begin{lstlisting}
+(:Session)-[:CONTAINS]->(:EmotionalState)
+\end{lstlisting}
+
+\subsection{TRIGGERS}
+
+Lie un trauma à ses concepts déclencheurs.
+
+\begin{lstlisting}
+(:Trauma)-[:TRIGGERS]->(:Concept)
+\end{lstlisting}
+
+% ============================================================================
+\section{Index recommandés}
+% ============================================================================
+
+\begin{lstlisting}
+-- Index primaires
+CREATE INDEX memory_id IF NOT EXISTS FOR (m:Memory) ON (m.id);
+CREATE INDEX concept_name IF NOT EXISTS FOR (c:Concept) ON (c.name);
+CREATE INDEX session_id IF NOT EXISTS FOR (s:Session) ON (s.id);
+
+-- Index de recherche
+CREATE INDEX memory_dominant IF NOT EXISTS FOR (m:Memory) ON (m.dominant);
+CREATE INDEX memory_type IF NOT EXISTS FOR (m:Memory) ON (m.type);
+CREATE INDEX memory_weight IF NOT EXISTS FOR (m:Memory) ON (m.weight);
+
+-- Index composites
+CREATE INDEX memory_type_weight IF NOT EXISTS 
+    FOR (m:Memory) ON (m.type, m.weight);
+\end{lstlisting}
+
+% ============================================================================
+\section{Requêtes Cypher courantes}
+% ============================================================================
+
+\subsection{Créer une mémoire avec concepts}
+
+\begin{lstlisting}
+// 1. Creer la memoire
+CREATE (m:Memory:MCT {
+    id: $id,
+    emotional_states: $emotional_states,  // JSON string
+    dominant: $dominant,
+    intensity: $intensity,
+    valence: $valence,
+    weight: $weight,
+    type: 'MCT',
+    created_at: datetime()
+})
+
+// 2. Creer/lier les concepts
+MERGE (c:Concept {name: $concept_name})
+ON CREATE SET c.created_at = datetime(), c.memory_ids = [$id]
+ON MATCH SET c.memory_ids = c.memory_ids + $id
+MERGE (m)-[:EVOQUE]->(c)
+\end{lstlisting}
+
+\subsection{Rechercher par sentence\_id}
+
+\begin{lstlisting}
+// Concepts contenant un sentence_id specifique
+MATCH (c:Concept)
+WHERE c.emotional_states IS NOT NULL 
+  AND c.emotional_states CONTAINS '"<sentence_id>":'
+RETURN c
+\end{lstlisting}
+
+\subsection{Trouver les mémoires similaires}
+
+\begin{lstlisting}
+MATCH (m:Memory)
+WHERE m.intensity IS NOT NULL AND m.valence IS NOT NULL
+WITH m,
+     1 - abs(m.intensity - $query_intensity) AS intensity_sim,
+     1 - abs(m.valence - $query_valence) AS valence_sim
+WITH m, (intensity_sim + valence_sim) / 2 AS similarity
+WHERE similarity >= $threshold
+RETURN m ORDER BY similarity DESC LIMIT $limit
+\end{lstlisting}
+
+\subsection{Consolider MCT vers MLT}
+
+\begin{lstlisting}
+MATCH (m:Memory)
+WHERE (m.type = 'MCT' OR m.type IS NULL) 
+  AND (m.consolidated IS NULL OR m.consolidated = false)
+  AND m.weight >= $threshold
+SET m.type = 'MLT', m.consolidated = true, m:MLT
+REMOVE m:MCT
+RETURN count(m) AS consolidated
+\end{lstlisting}
+
+% ============================================================================
+\section{Conventions importantes}
+% ============================================================================
+
+\subsection{Sérialisation JSON}
+
+\begin{warningbox}
+Les \texttt{emotional\_states} sont \textbf{toujours} stockés comme JSON string dans Neo4j.
+\end{warningbox}
+
+\begin{lstlisting}[language=Python]
+# Python -> Neo4j
+json.dumps({str(k): v for k, v in emotional_states.items()})
+
+# Neo4j -> Python  
+json.loads(emotional_states_string)
+\end{lstlisting}
+
+\subsection{Clés de sentence\_id}
+
+Les clés dans \texttt{emotional\_states} sont \textbf{toujours des strings} :
+
+\begin{lstlisting}[language=JSON]
+{"1": [...], "42": [...]}   // Correct
+{1: [...], 42: [...]}       // Incorrect
+\end{lstlisting}
+
+\subsection{Recherche dans JSON}
+
+Utiliser \texttt{CONTAINS} pour rechercher dans les JSON strings :
+
+\begin{lstlisting}
+WHERE c.emotional_states CONTAINS '"42":'  // Cherche sentence_id 42
+\end{lstlisting}
+
+\subsection{Syntaxe Neo4j 5+}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Ancienne syntaxe} & \textbf{Neo4j 5+} \\
+\midrule
+\texttt{NOT EXISTS(m.prop)} & \texttt{m.prop IS NULL} \\
+\texttt{EXISTS(m.prop)} & \texttt{m.prop IS NOT NULL} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================================
+\section{Analyse émotionnelle}
+% ============================================================================
+
+Lors de la récupération d'un concept avec \texttt{get\_concept}, une analyse est effectuée :
+
+\begin{lstlisting}[language=JSON]
+{
+    "name": "parc",
+    "memory_ids": ["MEM_1", "MEM_2"],
+    "emotional_states": {"1": [...], "4": [...]},
+    "sentence_ids": ["1", "4"],
+    "emotional_analysis": {
+        "dominant_emotion": "Joie",
+        "average_valence": 0.73,
+        "stability": 0.96,
+        "trajectory": "stable",
+        "trauma_score": 0.12
+    }
+}
+\end{lstlisting}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Champ} & \textbf{Description} \\
+\midrule
+\texttt{dominant\_emotion} & Émotion la plus fréquente parmi les 24 \\
+\texttt{average\_valence} & Valence moyenne [--1.0, 1.0] \\
+\texttt{stability} & Stabilité émotionnelle [0.0, 1.0] \\
+\texttt{trajectory} & \texttt{"stable"} | \texttt{"ascending"} | \texttt{"descending"} \\
+\texttt{trauma\_score} & Score de trauma [0.0, 1.0] \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================================
+\section{Schéma visuel complet}
+% ============================================================================
+
+\begin{center}
+\begin{tikzpicture}[
+    node distance=1.2cm and 1.8cm,
+    every node/.style={font=\sffamily\footnotesize},
+    memorybox/.style={
+        rectangle, rounded corners=5pt,
+        draw=memorycolor, fill=memorycolor!10,
+        minimum width=8cm, minimum height=3cm,
+        thick
+    },
+    conceptbox/.style={
+        rectangle, rounded corners=5pt,
+        draw=conceptcolor, fill=conceptcolor!10,
+        minimum width=8cm, minimum height=1.8cm,
+        thick
+    },
+    relation/.style={-{Stealth[length=2.5mm]}, thick, relationcolor},
+    property/.style={font=\ttfamily\scriptsize, align=left}
+]
+
+% Memory
+\node[memorybox] (memory) at (0, 2) {};
+\node[above] at (memory.north) {\textbf{Memory (MCT/MLT)}};
+\node[property] at (memory.center) {
+    id: "MEM\_123"\\
+    emotional\_states: '\{"1": [0.8, 0.2, ...24 vals]\}'\\
+    dominant: "Joie"\\
+    intensity: 0.85, valence: 0.9\\
+    weight: 0.7, type: "MLT"
+};
+
+% Concept 1
+\node[conceptbox] (concept1) at (0, -1) {};
+\node[above] at (concept1.north) {\textbf{Concept}};
+\node[property] at (concept1.center) {
+    name: "parc"\\
+    emotional\_states: '\{"1": [...], "4": [...]\}'\\
+    memory\_ids: ["MEM\_123", "MEM\_456"]
+};
+
+% Concept 2
+\node[conceptbox] (concept2) at (0, -3.5) {};
+\node[above] at (concept2.north) {\textbf{Concept}};
+\node[property] at (concept2.center) {
+    name: "canards"\\
+    emotional\_states: '\{"1": [...]\}'\\
+    memory\_ids: ["MEM\_123"]
+};
+
+% Relations
+\draw[relation] (memory) -- node[right, font=\scriptsize] {EVOQUE} (concept1);
+\draw[relation] (concept1) -- node[right, font=\scriptsize] {SEMANTIQUE \{type: "LOCALISE"\}} (concept2);
+
+\end{tikzpicture}
+\end{center}
+
+% ============================================================================
+\section{Comparaison avec l'ancienne architecture}
+% ============================================================================
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Élément} & \textbf{v3.0 (Patterns)} & \textbf{v3.1 (24 émotions)} \\
+\midrule
+Patterns statiques & Oui (8 patterns) & Non \\
+Transitions & TRANSITION\_TO & Implicites \\
+Nuances émotionnelles & Limitées & 24 dimensions \\
+Combinaisons & Pattern unique & Multi-émotions \\
+Complexité & Plus élevée & Simplifiée \\
+Nœuds & Memory, Concept, Pattern, Session & Memory, Concept, Session \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================================
+% FIN DU DOCUMENT
+% ============================================================================
+
+\vfill
+\begin{center}
+\rule{0.5\textwidth}{0.4pt}\\[0.5em]
+{\small Documentation générée le \today{} -- Version 3.1 (architecture simplifiée, 24 émotions)}
+\end{center}
+
+\end{document}
