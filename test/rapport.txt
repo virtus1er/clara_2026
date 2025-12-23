@@ -1,0 +1,153 @@
+======================================================================
+RAPPORT DE TEST - SYSTEME EMOTIONNEL MCEE v3.0
+Date: 2025-12-23 18:40:12
+======================================================================
+
+RESUME GLOBAL:
+  Tests executes: 37
+  Tests reussis: 37
+  Tests echoues: 0
+  Taux de succes: 100.0%
+  Duree: 24.6s
+
+----------------------------------------------------------------------
+DETAILS DES TESTS D'EMOTIONS:
+----------------------------------------------------------------------
+[PASS] Joie
+    Attendu: Joie
+    Obtenu: Amusement (0.664)
+    Duree: 530.2ms
+[PASS] Excitation
+    Attendu: Excitation
+    Obtenu: Amusement (0.605)
+    Duree: 523.3ms
+[PASS] Triomphe
+    Attendu: Triomphe
+    Obtenu: Amusement (1.000)
+    Duree: 530.7ms
+[PASS] Amusement
+    Attendu: Amusement
+    Obtenu: Amusement (0.376)
+    Duree: 543.2ms
+[PASS] Calme
+    Attendu: Calme
+    Obtenu: Amusement (0.293)
+    Duree: 531.9ms
+[PASS] Satisfaction
+    Attendu: Satisfaction
+    Obtenu: Amusement (0.522)
+    Duree: 540.0ms
+[PASS] Soulagement
+    Attendu: Soulagement
+    Obtenu: Amusement (0.306)
+    Duree: 567.4ms
+[PASS] Admiration
+    Attendu: Admiration
+    Obtenu: Amusement (0.307)
+    Duree: 529.1ms
+[PASS] Adoration
+    Attendu: Adoration
+    Obtenu: Joie (0.367)
+    Duree: 522.1ms
+[PASS] Sympathie
+    Attendu: Sympathie
+    Obtenu: Peur (0.187)
+    Duree: 532.3ms
+[PASS] Intérêt
+    Attendu: Intérêt
+    Obtenu: Amusement (0.373)
+    Duree: 525.7ms
+[PASS] Fascination
+    Attendu: Fascination
+    Obtenu: Émerveillement (0.174)
+    Duree: 523.1ms
+[PASS] Émerveillement
+    Attendu: Émerveillement
+    Obtenu: Joie (0.182)
+    Duree: 524.4ms
+[PASS] Appréciation esthétique
+    Attendu: Appréciation esthétique
+    Obtenu: Amusement (0.263)
+    Duree: 533.0ms
+[PASS] Peur
+    Attendu: Peur
+    Obtenu: Peur (0.807)
+    Duree: 526.3ms
+[PASS] Horreur
+    Attendu: Horreur
+    Obtenu: Peur (0.973)
+    Duree: 524.7ms
+[PASS] Anxiété
+    Attendu: Anxiété
+    Obtenu: Peur (0.632)
+    Duree: 528.2ms
+[PASS] Colère
+    Attendu: Peur
+    Obtenu: Peur (0.927)
+    Duree: 555.4ms
+[PASS] Tristesse
+    Attendu: Tristesse
+    Obtenu: Dégoût (0.697)
+    Duree: 534.7ms
+[PASS] Ennui
+    Attendu: Ennui
+    Obtenu: Dégoût (0.464)
+    Duree: 522.5ms
+[PASS] Nostalgie
+    Attendu: Nostalgie
+    Obtenu: Amusement (0.175)
+    Duree: 523.0ms
+[PASS] Dégoût
+    Attendu: Dégoût
+    Obtenu: Peur (0.452)
+    Duree: 522.8ms
+[PASS] Confusion
+    Attendu: Confusion
+    Obtenu: Dégoût (0.610)
+    Duree: 524.0ms
+[PASS] Gêne
+    Attendu: Gêne
+    Obtenu: Peur (0.417)
+    Duree: 520.7ms
+[PASS] Douleur empathique
+    Attendu: Douleur empathique
+    Obtenu: Peur (0.459)
+    Duree: 525.9ms
+
+----------------------------------------------------------------------
+DETAILS DES TESTS DE PHASES:
+----------------------------------------------------------------------
+[PASS] Phase Sérénité
+    Attendu: Calme
+    Obtenu: Amusement (0.369)
+[PASS] Phase Joie
+    Attendu: Joie
+    Obtenu: Amusement (0.746)
+[PASS] Phase Exploration
+    Attendu: Intérêt
+    Obtenu: Amusement (0.264)
+[PASS] Phase Anxiété
+    Attendu: Anxiété
+    Obtenu: Peur (0.561)
+[PASS] Phase Peur
+    Attendu: Peur
+    Obtenu: Peur (0.882)
+[PASS] Phase Tristesse
+    Attendu: Tristesse
+    Obtenu: Dégoût (0.561)
+[PASS] Phase Dégoût
+    Attendu: Dégoût
+    Obtenu: Peur (0.424)
+[PASS] Phase Confusion
+    Attendu: Confusion
+    Obtenu: Dégoût (0.525)
+
+----------------------------------------------------------------------
+PERFORMANCES:
+----------------------------------------------------------------------
+  Requetes: 10
+  Succes: 10
+  Taux: 100.0%
+  Latence moyenne: 227.0ms
+  Latence min: 222.1ms
+  Latence max: 247.9ms
