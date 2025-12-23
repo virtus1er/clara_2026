@@ -96,7 +96,7 @@ Memory parseMemory(const json& j) {
     m.decisionalInfluence = j.value("decisional_influence", 0.0);
     m.isTrauma = j.value("is_trauma", false);
     m.timestamp = std::chrono::steady_clock::now();
-    
+
     m.emotionalVector.fill(0.0);
     if (j.contains("emotional_vector") && j["emotional_vector"].is_array()) {
         for (size_t i = 0; i < std::min(j["emotional_vector"].size(), (size_t)24); ++i) {
@@ -104,6 +104,94 @@ Memory parseMemory(const json& j) {
         }
     }
     return m;
+}
+
+/**
+ * Parse un snapshot MCTGraph enrichi
+ */
+void parseMCTGraphSnapshot(const json& j, DreamEngine& engine) {
+    // Vérifier que c'est bien un snapshot MCTGraph
+    if (!j.contains("word_nodes") || !j.contains("edges")) {
+        return;  // Format ancien, ignorer
+    }
+
+    std::vector<WordNodeSnapshot> words;
+    std::vector<CausalLink> causalLinks;
+    CausalStats stats;
+
+    // Parser les nœuds mot
+    if (j["word_nodes"].is_array()) {
+        for (const auto& wn : j["word_nodes"]) {
+            WordNodeSnapshot w;
+            w.id = wn.value("id", "");
+            w.lemma = wn.value("lemma", "");
+            w.pos = wn.value("pos", "");
+            w.sentenceId = wn.value("sentence_id", "");
+            w.sentimentScore = wn.value("sentiment_score", 0.0);
+            w.isNegation = wn.value("is_negation", false);
+            w.isIntensifier = wn.value("is_intensifier", false);
+            words.push_back(w);
+        }
+    }
+
+    // Parser les arêtes et extraire les liens causaux
+    if (j["edges"].is_array()) {
+        for (const auto& edge : j["edges"]) {
+            std::string edgeType = edge.value("type", "");
+            if (edgeType == "CAUSAL") {
+                CausalLink link;
+                link.wordId = edge.value("source_id", "");
+                link.emotionId = edge.value("target_id", "");
+                link.causalStrength = edge.value("weight", 0.5);
+                link.temporalDistanceMs = edge.value("temporal_distance_ms", 0.0);
+                link.timestamp = std::chrono::steady_clock::now();
+
+                // Trouver le lemma du mot source
+                for (const auto& w : words) {
+                    if (w.id == link.wordId) {
+                        link.wordLemma = w.lemma;
+                        link.wordPos = w.pos;
+                        break;
+                    }
+                }
+
+                causalLinks.push_back(link);
+                stats.totalCausalEdges++;
+            }
+        }
+    }
+
+    // Parser les nœuds émotion pour enrichir les liens causaux
+    if (j["emotion_nodes"].is_array()) {
+        for (auto& link : causalLinks) {
+            for (const auto& en : j["emotion_nodes"]) {
+                if (en.value("id", "") == link.emotionId) {
+                    link.dominantEmotion = en.value("dominant_emotion", "");
+                    break;
+                }
+            }
+        }
+    }
+
+    // Parser les statistiques globales
+    if (j.contains("stats")) {
+        const auto& s = j["stats"];
+        stats.mostFrequentEmotion = s.value("most_frequent_emotion", "");
+        stats.averageEmotionIntensity = s.value("average_emotion_intensity", 0.0);
+        stats.graphDensity = s.value("graph_density", 0.0);
+
+        if (s.contains("top_trigger_words") && s["top_trigger_words"].is_array()) {
+            for (const auto& tw : s["top_trigger_words"]) {
+                stats.topTriggerWords.push_back(tw.get<std::string>());
+            }
+        }
+    }
+
+    // Envoyer au DreamEngine
+    engine.processMCTGraphSnapshot(words, causalLinks, stats);
+
+    std::cout << "[Consumer] MCTGraph snapshot: " << words.size() << " mots, "
+              << causalLinks.size() << " liens causaux\n";
 }
 
 void publish(const std::string& queue, const json& payload) {
@@ -168,7 +256,25 @@ void consumerThread(DreamEngine& engine) {
             processMemory(tagSem, "semantic");
             processMemory(tagProc, "procedural");
             processMemory(tagAuto, "autobiographic");
-            processMemory(tagMct, "mct");
+
+            // Traitement spécial pour MCTGraph snapshots
+            if (channel->BasicConsumeMessage(tagMct, env, 10)) {
+                try {
+                    json j = json::parse(env->Message()->Body());
+                    // Vérifier si c'est un snapshot MCTGraph enrichi
+                    if (j.contains("word_nodes") && j.contains("edges")) {
+                        parseMCTGraphSnapshot(j, engine);
+                    } else {
+                        // Format ancien: traiter comme mémoire simple
+                        Memory m = parseMemory(j);
+                        m.type = "mct";
+                        engine.addMemoryToMCT(m);
+                        std::cout << "[Consumer] + mct (legacy): " << m.id << "\n";
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[Consumer] Erreur parsing MCT: " << e.what() << "\n";
+                }
+            }
             
             // Pattern
             if (channel->BasicConsumeMessage(tagPat, env, 10)) {
@@ -319,20 +425,34 @@ int main(int argc, char* argv[]) {
             // Status toutes les 10s
             if (++tick % 10 == 0) {
                 auto stats = engine.getStats();
+                auto causalLinks = engine.getCausalLinks();
+                auto topWords = engine.getTopTriggerWords();
+
                 json status;
                 status["state"] = dreamStateToString(engine.getCurrentState());
                 status["pattern"] = pattern;
                 status["cycle_progress"] = engine.getCycleProgress();
                 status["mct_size"] = engine.getMCTMemories().size();
+                status["causal_links"] = causalLinks.size();
                 status["stats"] = {
                     {"cycles", stats.totalCyclesCompleted},
                     {"consolidated", stats.totalMemoriesConsolidated},
                     {"edges", stats.totalEdgesCreated}
                 };
+
+                // Ajouter les mots déclencheurs
+                if (!topWords.empty()) {
+                    status["top_trigger_words"] = json::array();
+                    for (const auto& w : topWords) {
+                        status["top_trigger_words"].push_back(w);
+                    }
+                }
+
                 publish(g_config.q_status, status);
-                
+
                 std::cout << "[Status] " << dreamStateToString(engine.getCurrentState())
                           << " | MCT: " << engine.getMCTMemories().size()
+                          << " | Causal: " << causalLinks.size()
                           << " | Cycles: " << stats.totalCyclesCompleted << "\n";
             }
             
