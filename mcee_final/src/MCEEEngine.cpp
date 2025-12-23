@@ -1054,15 +1054,21 @@ void MCEEEngine::tokensConsumeLoop() {
 void MCEEEngine::snapshotTimerLoop() {
     std::cout << "[MCEEEngine] Timer snapshot MCTGraph démarré" << std::endl;
 
+    // Utiliser l'intervalle de snapshot configuré au lieu de polling toutes les 500ms
+    const auto snapshot_interval = std::chrono::milliseconds(
+        static_cast<int>(mct_graph_->getConfig().snapshot_interval_seconds * 1000)
+    );
+
     while (running_.load()) {
-        // Attendre l'intervalle configuré
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // Attendre l'intervalle de snapshot complet
+        std::this_thread::sleep_for(snapshot_interval);
 
         if (!running_.load()) break;
 
-        // Déclencher le snapshot si l'intervalle est atteint
         if (mct_graph_) {
-            mct_graph_->triggerSnapshot();
+            // Créer et publier le snapshot directement
+            auto snapshot = mct_graph_->createSnapshot();
+            publishSnapshot(snapshot);
 
             // Maintenance périodique du graphe
             mct_graph_->pruneExpiredNodes();
