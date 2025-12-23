@@ -141,7 +141,7 @@ void MCEEEngine::initMemorySystem() {
             Phase current_phase = phase_detector_.getCurrentPhase();
             auto memories = memory_manager_.queryRelevantMemories(current_phase, current_state_, 5);
             if (amyghaleon_.checkEmergency(current_state_, memories, 0.5)) {
-                amyghaleon_.triggerEmergencyResponse(current_state_, current_phase);
+                (void)amyghaleon_.triggerEmergencyResponse(current_state_, current_phase);
             }
         }
     });
