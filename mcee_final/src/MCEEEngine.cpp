@@ -117,9 +117,35 @@ void MCEEEngine::initMemorySystem() {
     pm_config.verbose_logging = true;
     pattern_matcher_ = std::make_shared<PatternMatcher>(mct_, mlt_, pm_config);
 
+    // Créer le ConscienceEngine (module Conscience & Sentiments)
+    ConscienceConfig conscience_config;
+    conscience_config.beta_memory = 0.15;
+    conscience_config.delta_environment = 0.1;
+    conscience_config.omega_trauma = 5.0;
+    conscience_config.lambda_feedback = 0.2;
+    conscience_config.sentiment_smoothing = 0.1;
+    conscience_engine_ = std::make_shared<ConscienceEngine>(conscience_config);
+
+    // Configurer les callbacks du ConscienceEngine
+    conscience_engine_->setUpdateCallback([this](const ConscienceSentimentState& state) {
+        std::cout << "[Conscience] Ct=" << std::fixed << std::setprecision(2)
+                  << state.consciousness_level << " Ft=" << state.sentiment
+                  << " (" << state.dominant_state << ")\n";
+    });
+
+    conscience_engine_->setTraumaAlertCallback([this](const TraumaState& trauma) {
+        std::cout << "[Conscience] ⚠ Trauma actif: " << trauma.source
+                  << " (intensité=" << trauma.intensity << ")\n";
+        // Relier au système Amyghaleon si nécessaire
+        if (trauma.intensity >= 0.8) {
+            amyghaleon_.processState(current_state_, current_feedback_);
+        }
+    });
+
     std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
     std::cout << "[MCEEEngine] MCTGraph: fenêtre=" << graph_config.time_window_seconds << "s\n";
     std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
+    std::cout << "[MCEEEngine] ConscienceEngine initialisé (Wt=" << conscience_engine_->getWisdom() << ")\n";
 }
 
 void MCEEEngine::setupCallbacks() {
