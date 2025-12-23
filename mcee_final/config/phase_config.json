@@ -1,6 +1,6 @@
 {
   "neo4j": {
-    "enabled": true,
+    "enabled": false,
     "rabbitmq_host": "localhost",
     "rabbitmq_port": 5672,
     "rabbitmq_user": "virtus",
