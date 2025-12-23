@@ -42,7 +42,7 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph + Conscience
+# Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph + Conscience + ADDO
 set(MCEE_SOURCES
     src/main.cpp
     src/MCEEEngine.cpp
@@ -57,6 +57,7 @@ set(MCEE_SOURCES
     src/SpeechInput.cpp
     src/Neo4jClient.cpp
     src/ConscienceEngine.cpp
+    src/ADDOEngine.cpp
 )
 
 set(MCEE_HEADERS
@@ -75,6 +76,8 @@ set(MCEE_HEADERS
     include/Neo4jClient.hpp
     include/ConscienceConfig.hpp
     include/ConscienceEngine.hpp
+    include/ADDOConfig.hpp
+    include/ADDOEngine.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})

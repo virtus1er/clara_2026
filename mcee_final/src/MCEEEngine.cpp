@@ -146,10 +146,28 @@ void MCEEEngine::initMemorySystem() {
         }
     });
 
+    // Créer le module ADDO (Détermination des Objectifs)
+    ADDOConfig addo_config;
+    addo_config.use_wisdom_modulation = true;
+    addo_config.use_sentiment_for_S = true;
+    addo_config.emergency_override = true;
+    addo_engine_ = std::make_shared<ADDOEngine>(addo_config);
+
+    // Configurer les callbacks ADDO
+    addo_engine_->setUpdateCallback([](const GoalState& state) {
+        std::cout << "[ADDO] G(t)=" << std::fixed << std::setprecision(2)
+                  << state.G << " (dominant: " << state.dominant_variable << ")\n";
+    });
+
+    addo_engine_->setEmergencyCallback([this](const std::string& emergency_goal) {
+        std::cout << "[ADDO] ⚡ Objectif d'urgence: " << emergency_goal << "\n";
+    });
+
     std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
     std::cout << "[MCEEEngine] MCTGraph: fenêtre=" << graph_config.time_window_seconds << "s\n";
     std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
     std::cout << "[MCEEEngine] ConscienceEngine initialisé (Wt=" << conscience_engine_->getWisdom() << ")\n";
+    std::cout << "[MCEEEngine] ADDOEngine initialisé (Rs=" << addo_engine_->getResilience() << ")\n";
 }
 
 void MCEEEngine::setupCallbacks() {
@@ -1201,6 +1219,20 @@ void MCEEEngine::publishSnapshot(const MCTGraphSnapshot& snapshot) {
     } catch (const std::exception& e) {
         std::cerr << "[MCEEEngine] Erreur publication snapshot: " << e.what() << "\n";
     }
+}
+
+ConscienceSentimentState MCEEEngine::getConscienceState() const {
+    if (conscience_engine_) {
+        return conscience_engine_->getCurrentState();
+    }
+    return ConscienceSentimentState{};
+}
+
+GoalState MCEEEngine::getGoalState() const {
+    if (addo_engine_) {
+        return addo_engine_->getCurrentState();
+    }
+    return GoalState{};
 }
 
 } // namespace mcee
