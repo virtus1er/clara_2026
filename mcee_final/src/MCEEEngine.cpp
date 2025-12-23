@@ -138,7 +138,11 @@ void MCEEEngine::initMemorySystem() {
                   << " (intensité=" << trauma.intensity << ")\n";
         // Relier au système Amyghaleon si nécessaire
         if (trauma.intensity >= 0.8) {
-            amyghaleon_.processState(current_state_, current_feedback_);
+            Phase current_phase = phase_detector_.getCurrentPhase();
+            auto memories = memory_manager_.queryRelevantMemories(current_phase, current_state_, 5);
+            if (amyghaleon_.checkEmergency(current_state_, memories, 0.5)) {
+                amyghaleon_.triggerEmergencyResponse(current_state_, current_phase);
+            }
         }
     });
 
