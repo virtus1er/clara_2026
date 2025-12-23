@@ -183,13 +183,15 @@ MCEEEngine::~MCEEEngine() {
 
 bool MCEEEngine::start() {
     if (running_.load()) {
-        std::cout << "[MCEEEngine] Déjà en cours d'exécution\n";
+        std::cout << "[MCEEEngine] Déjà en cours d'exécution" << std::endl;
         return true;
     }
 
+    std::cout << "[MCEEEngine] Démarrage en cours..." << std::endl;
+
     // Initialiser RabbitMQ
     if (!initRabbitMQ()) {
-        std::cerr << "[MCEEEngine] Échec initialisation RabbitMQ\n";
+        std::cerr << "[MCEEEngine] Échec initialisation RabbitMQ" << std::endl;
         return false;
     }
 
@@ -201,15 +203,15 @@ bool MCEEEngine::start() {
     tokens_consumer_thread_ = std::thread(&MCEEEngine::tokensConsumeLoop, this);
     snapshot_timer_thread_ = std::thread(&MCEEEngine::snapshotTimerLoop, this);
 
-    std::cout << "[MCEEEngine] ✓ Démarré et en attente de messages RabbitMQ\n";
+    std::cout << "[MCEEEngine] ✓ Démarré et en attente de messages RabbitMQ" << std::endl;
     std::cout << "[MCEEEngine] Émotions: " << rabbitmq_config_.emotions_exchange
-              << " / " << rabbitmq_config_.emotions_routing_key << "\n";
+              << " / " << rabbitmq_config_.emotions_routing_key << std::endl;
     std::cout << "[MCEEEngine] Parole: " << rabbitmq_config_.speech_exchange
-              << " / " << rabbitmq_config_.speech_routing_key << "\n";
+              << " / " << rabbitmq_config_.speech_routing_key << std::endl;
     std::cout << "[MCEEEngine] Tokens: " << rabbitmq_config_.tokens_exchange
-              << " / " << rabbitmq_config_.tokens_routing_key << "\n";
+              << " / " << rabbitmq_config_.tokens_routing_key << std::endl;
     std::cout << "[MCEEEngine] MCTGraph snapshot interval: "
-              << mct_graph_->getConfig().snapshot_interval_seconds << "s\n\n";
+              << mct_graph_->getConfig().snapshot_interval_seconds << "s" << std::endl;
 
     return true;
 }
@@ -343,9 +345,9 @@ bool MCEEEngine::initRabbitMQ() {
             false, true, false
         );
 
-        std::cout << "[MCEEEngine] Connexion RabbitMQ établie\n";
-        std::cout << "[MCEEEngine] Queues créées: emotions + speech + tokens\n";
-        std::cout << "[MCEEEngine] Exchange snapshot: " << rabbitmq_config_.snapshot_exchange << "\n";
+        std::cout << "[MCEEEngine] Connexion RabbitMQ établie" << std::endl;
+        std::cout << "[MCEEEngine] Queues créées: emotions + speech + tokens" << std::endl;
+        std::cout << "[MCEEEngine] Exchange snapshot: " << rabbitmq_config_.snapshot_exchange << std::endl;
         return true;
 
     } catch (const std::exception& e) {
@@ -355,7 +357,7 @@ bool MCEEEngine::initRabbitMQ() {
 }
 
 void MCEEEngine::emotionsConsumeLoop() {
-    std::cout << "[MCEEEngine] Boucle de consommation des émotions démarrée\n";
+    std::cout << "[MCEEEngine] Boucle de consommation des émotions démarrée" << std::endl;
 
     while (running_.load()) {
         try {
@@ -378,7 +380,7 @@ void MCEEEngine::emotionsConsumeLoop() {
 }
 
 void MCEEEngine::speechConsumeLoop() {
-    std::cout << "[MCEEEngine] Boucle de consommation de la parole démarrée\n";
+    std::cout << "[MCEEEngine] Boucle de consommation de la parole démarrée" << std::endl;
 
     while (running_.load()) {
         try {
@@ -1027,7 +1029,7 @@ void MCEEEngine::runLearning() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 void MCEEEngine::tokensConsumeLoop() {
-    std::cout << "[MCEEEngine] Boucle de consommation des tokens démarrée\n";
+    std::cout << "[MCEEEngine] Boucle de consommation des tokens démarrée" << std::endl;
 
     while (running_.load()) {
         try {
@@ -1050,7 +1052,7 @@ void MCEEEngine::tokensConsumeLoop() {
 }
 
 void MCEEEngine::snapshotTimerLoop() {
-    std::cout << "[MCEEEngine] Timer snapshot MCTGraph démarré\n";
+    std::cout << "[MCEEEngine] Timer snapshot MCTGraph démarré" << std::endl;
 
     while (running_.load()) {
         // Attendre l'intervalle configuré
