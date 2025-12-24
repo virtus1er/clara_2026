@@ -26,6 +26,7 @@
 #include "SpeechInput.hpp"
 #include "ConscienceEngine.hpp"
 #include "ADDOEngine.hpp"
+#include "DecisionEngine.hpp"
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -233,6 +234,11 @@ public:
     std::shared_ptr<ADDOEngine> getADDOEngine() { return addo_engine_; }
 
     /**
+     * @brief Retourne le DecisionEngine (Prise de Décision Réfléchie)
+     */
+    std::shared_ptr<DecisionEngine> getDecisionEngine() { return decision_engine_; }
+
+    /**
      * @brief Récupère l'état de conscience et sentiment actuel
      */
     ConscienceSentimentState getConscienceState() const;
@@ -241,6 +247,17 @@ public:
      * @brief Récupère l'objectif courant G(t)
      */
     GoalState getGoalState() const;
+
+    /**
+     * @brief Effectue une prise de décision réfléchie
+     * @param context_type Type de contexte
+     * @param available_actions Actions disponibles (optionnel)
+     * @return Résultat de décision
+     */
+    DecisionResult makeDecision(
+        const std::string& context_type,
+        const std::vector<ActionOption>& available_actions = {}
+    );
 
     /**
      * @brief Envoie un feedback sur le pattern actuel
@@ -269,6 +286,7 @@ private:
     std::shared_ptr<PatternMatcher> pattern_matcher_;
     std::shared_ptr<ConscienceEngine> conscience_engine_;  // Module Conscience & Sentiments
     std::shared_ptr<ADDOEngine> addo_engine_;              // Module Détermination des Objectifs
+    std::shared_ptr<DecisionEngine> decision_engine_;      // Module Prise de Décision Réfléchie
     MatchResult current_match_;
 
     // ID de la dernière émotion ajoutée (pour liaison avec mots)
