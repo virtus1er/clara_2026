@@ -736,7 +736,7 @@ void MCEEEngine::printState() const {
 }
 
 void MCEEEngine::publishState() {
-    if (!channel_) return;
+    if (!publish_channel_) return;
 
     try {
         json output;
