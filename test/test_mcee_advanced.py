@@ -290,6 +290,45 @@ class MCEEAdvancedTest:
         self.channel.exchange_declare(exchange="mcee.speech.input", exchange_type='topic', durable=True)
         self.channel.exchange_declare(exchange="mcee.emotional.output", exchange_type='topic', durable=True)
 
+    def check_mcee_ready(self) -> bool:
+        """Vérifie que les queues du MCEE existent (MCEE démarré)"""
+        try:
+            # passive=True = juste vérifier l'existence, ne pas créer
+            # Si la queue n'existe pas, une exception est levée
+            self.channel.queue_declare(queue="mcee_emotions_queue", passive=True)
+            return True
+        except pika.exceptions.ChannelClosedByBroker:
+            # Queue n'existe pas - recréer le channel car il est fermé après l'erreur
+            self.channel = self.connection.channel()
+            return False
+        except Exception:
+            return False
+
+    def wait_for_mcee(self, timeout: float = 10.0) -> bool:
+        """Attend que le MCEE soit démarré (queues créées)
+
+        Args:
+            timeout: Timeout en secondes
+
+        Returns:
+            True si MCEE détecté, False sinon
+        """
+        print("  🔍 Vérification que le MCEE est démarré...")
+
+        start_time = time.time()
+        while (time.time() - start_time) < timeout:
+            if self.check_mcee_ready():
+                print("  ✓ MCEE détecté et prêt !")
+                return True
+
+            remaining = int(timeout - (time.time() - start_time))
+            print(f"  ⏳ MCEE non détecté, attente... ({remaining}s restantes)")
+            time.sleep(1.0)
+
+        print(f"  ✗ Timeout: MCEE non détecté après {timeout:.0f}s")
+        print("    → Lancez le MCEE dans un autre terminal: cd mcee_final/build && ./mcee")
+        return False
+
     def start_receiver(self):
         """Démarre le thread de réception des réponses MCEE"""
         if self.receiver_running:
@@ -1100,6 +1139,11 @@ def main():
         if args.monitor:
             monitor_mode(client)
         else:
+            # Vérifier que le MCEE est démarré (queues existent)
+            if not client.wait_for_mcee(timeout=10.0):
+                print("\n⚠ Impossible de continuer sans le MCEE.")
+                sys.exit(1)
+
             # Démarrer le receiver pour écouter les réponses MCEE
             client.start_receiver()
 
