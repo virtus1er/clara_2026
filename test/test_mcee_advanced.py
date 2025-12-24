@@ -283,6 +283,51 @@ class MCEEAdvancedTest:
         self.channel.exchange_declare(exchange="mcee.speech.input", exchange_type='topic', durable=True)
         self.channel.exchange_declare(exchange="mcee.emotional.output", exchange_type='topic', durable=True)
     
+    def check_mcee_ready(self) -> bool:
+        """
+        Vérifie que le MCEE est démarré en testant l'existence de ses queues.
+        Retourne True si le MCEE est prêt, False sinon.
+        """
+        try:
+            # Vérifier que la queue speech du MCEE existe (passive=True = juste vérifier)
+            self.channel.queue_declare(queue="mcee_speech_queue", passive=True)
+            self.channel.queue_declare(queue="mcee_emotions_queue", passive=True)
+            return True
+        except Exception:
+            return False
+    
+    def wait_for_mcee(self, timeout: float = 30.0, check_interval: float = 1.0) -> bool:
+        """
+        Attend que le MCEE soit démarré (queues créées).
+        Retourne True si MCEE prêt, False si timeout.
+        """
+        print(f"  🔍 Vérification que le MCEE est démarré...")
+        
+        start_time = time.time()
+        while (time.time() - start_time) < timeout:
+            # Reconnecter si nécessaire (passive declare peut fermer le canal en cas d'erreur)
+            if self.channel.is_closed:
+                self.connect()
+            
+            if self.check_mcee_ready():
+                print(f"  ✓ MCEE détecté et prêt !")
+                return True
+            
+            remaining = int(timeout - (time.time() - start_time))
+            print(f"  ⏳ MCEE non détecté, attente... ({remaining}s restantes)")
+            time.sleep(check_interval)
+        
+        print(f"  ✗ Timeout: MCEE non détecté après {timeout}s")
+        print(f"    → Lancez le MCEE dans un autre terminal: ./mcee")
+        return False
+    
+    def warmup(self, seconds: float = 2.0):
+        """
+        Vérifie que le MCEE est prêt avant de commencer les tests.
+        """
+        if not self.wait_for_mcee(timeout=10.0):
+            raise RuntimeError("MCEE non démarré ! Lancez ./mcee avant les tests.")
+    
     def close(self):
         """Ferme la connexion"""
         if self.connection and not self.connection.is_closed:
@@ -346,6 +391,9 @@ def test_amyghaleon_escalade(client: MCEEAdvancedTest):
     print("    - Urgence immédiate: Peur > 0.85 ou Horreur > 0.80")
     print("─" * 70)
     
+    # Vérifier que le MCEE est prêt
+    client.warmup()
+    
     steps = [
         ("baseline_calme", "baseline", "État de base (calme)", 2),
         ("anxiete_legere", "anxiete_legere", "Anxiété légère détectée", 2),
@@ -377,6 +425,9 @@ def test_amyghaleon_seuils(client: MCEEAdvancedTest):
     print("═" * 70)
     print("  Objectif: Vérifier que les seuils varient selon la phase active")
     print("─" * 70)
+    
+    # Vérifier que le MCEE est prêt
+    client.warmup()
     
     # 1. Établir phase SERENITE (seuil 0.90 - difficile)
     print("\n┌─ PHASE 1: Établir SÉRÉNITÉ (seuil 0.90)")
@@ -440,6 +491,9 @@ def test_amyghaleon_actions(client: MCEEAdvancedTest):
     print("    - Anxiété dominante → ALERTE")
     print("─" * 70)
     
+    # Vérifier que le MCEE est prêt
+    client.warmup()
+    
     # Test FUITE (peur dominante)
     print("\n┌─ TEST ACTION: FUITE (Peur dominante)")
     print("└" + "─" * 50)
@@ -447,12 +501,20 @@ def test_amyghaleon_actions(client: MCEEAdvancedTest):
     client.send_text("Il faut fuir ! Danger immédiat !")
     client.wait(3, "Action FUITE attendue")
     
+    # Retour au calme entre les tests
+    client.send_dimensions(DIMENSION_PROFILES["retour_calme"], "retour_calme")
+    client.wait(2, "Retour au calme")
+    
     # Test BLOCAGE (horreur dominante)
     print("\n┌─ TEST ACTION: BLOCAGE (Horreur dominante)")
     print("└" + "─" * 50)
     client.send_dimensions(DIMENSION_PROFILES["horreur_choc"], "horreur_choc")
     client.send_text("Non... c'est horrible... je n'arrive plus à bouger...")
     client.wait(3, "Action BLOCAGE attendue")
+    
+    # Retour au calme entre les tests
+    client.send_dimensions(DIMENSION_PROFILES["retour_calme"], "retour_calme")
+    client.wait(2, "Retour au calme")
     
     # Test ALERTE (anxiété élevée sans peur extrême)
     print("\n┌─ TEST ACTION: ALERTE (Anxiété dominante)")
@@ -481,6 +543,9 @@ def test_memoire_creation(client: MCEEAdvancedTest):
     print("    - Valence extrême (très positive ou très négative)")
     print("    - Nouveauté (pattern inédit)")
     print("─" * 70)
+    
+    # Vérifier que le MCEE est prêt
+    client.warmup()
     
     # Souvenir positif intense
     print("\n┌─ CRÉATION: Souvenir POSITIF intense")
@@ -520,6 +585,9 @@ def test_memoire_rappel(client: MCEEAdvancedTest):
     print("═" * 70)
     print("  Objectif: Vérifier l'activation des souvenirs similaires")
     print("─" * 70)
+    
+    # Vérifier que le MCEE est prêt
+    client.warmup()
     
     # D'abord créer un contexte émotionnel
     print("\n┌─ ÉTAPE 1: Établir contexte de joie")
@@ -567,6 +635,9 @@ def test_patterns_transitions(client: MCEEAdvancedTest):
     print("                    PEUR, TRISTESSE, DEGOUT, CONFUSION")
     print("─" * 70)
     
+    # Vérifier que le MCEE est prêt
+    client.warmup()
+    
     transitions = [
         ("serenite_profonde", "serenite", "SERENITE → baseline"),
         ("joie_intense", "joie", "SERENITE → JOIE"),
@@ -597,6 +668,9 @@ def test_patterns_creation(client: MCEEAdvancedTest):
     print("═" * 70)
     print("  Objectif: Provoquer la création de patterns CUSTOM")
     print("─" * 70)
+    
+    # Vérifier que le MCEE est prêt
+    client.warmup()
     
     # Combinaison inhabituelle 1: Curiosité + Peur
     print("\n┌─ COMBINAISON 1: Curiosité + Peur (fascination morbide)")
@@ -650,6 +724,9 @@ def test_scenario_urgence_complete(client: MCEEAdvancedTest):
     print("═" * 70)
     print("  Simulation d'une situation d'urgence réaliste")
     print("─" * 70)
+    
+    # Vérifier que le MCEE est prêt
+    client.warmup()
     
     # Acte 1: Situation normale
     print("\n╔══════════════════════════════════════════════════════════════╗")
@@ -733,10 +810,13 @@ def test_scenario_journee_emotionnelle(client: MCEEAdvancedTest):
     print("  SCÉNARIO - JOURNÉE ÉMOTIONNELLE COMPLÈTE")
     print("═" * 70)
     
+    # Vérifier que le MCEE est prêt
+    client.warmup()
+    
     moments = [
         # Matin
         ("serenite_profonde", "Réveil paisible, une belle journée commence.", 2),
-        ("excitation_positive", "Super nouvelle ! J'ai été accepté pour le projet !", 3),
+        ("excitation_positive", "Super nouvelle ! J'ai été accepté pour le projet !", 2),
         ("joie_intense", "C'est incroyable, je n'arrive pas à y croire !", 2),
         
         # Milieu de journée - stress

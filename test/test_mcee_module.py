@@ -285,7 +285,7 @@ class MCEEModuleTester:
             return False
 
     def check_mcee_running(self) -> bool:
-        """Verifie si le module MCEE est en cours d'execution."""
+        """Verifie si le module MCEE est en cours d'execution (via exchanges)."""
         try:
             conn = self.get_connection()
             channel = conn.channel()
@@ -321,6 +321,72 @@ class MCEEModuleTester:
         except Exception as e:
             self.log(f"Erreur verification MCEE: {e}", "ERROR")
             return False
+
+    def check_mcee_ready(self) -> bool:
+        """
+        Verifie que les queues du MCEE existent.
+
+        C'est plus fiable que de verifier les exchanges car les messages
+        envoyes a un exchange sans queue bindee sont perdus.
+
+        Les queues creees par le MCEE sont:
+        - mcee_emotions_queue: reception des emotions
+        - mcee_speech_queue: reception de la parole
+        """
+        try:
+            conn = self.get_connection()
+            channel = conn.channel()
+
+            # passive=True = juste verifier, ne pas creer
+            try:
+                channel.queue_declare(queue="mcee_emotions_queue", passive=True)
+            except pika.exceptions.ChannelClosedByBroker:
+                conn.close()
+                return False
+
+            try:
+                channel.queue_declare(queue="mcee_speech_queue", passive=True)
+            except pika.exceptions.ChannelClosedByBroker:
+                conn.close()
+                return False
+
+            conn.close()
+            return True
+
+        except Exception as e:
+            self.log(f"Erreur verification queues MCEE: {e}", "ERROR")
+            return False
+
+    def wait_for_mcee(self, timeout: float = 30.0) -> bool:
+        """
+        Attend que le MCEE soit demarre.
+
+        Args:
+            timeout: Timeout en secondes (defaut: 30s)
+
+        Returns:
+            True si le MCEE est pret, False si timeout atteint
+
+        Raises:
+            RuntimeError: Si timeout atteint et raise_on_timeout=True
+        """
+        start_time = time.time()
+        check_interval = 1.0
+
+        print(f"  🔍 Verification que le MCEE est demarre...")
+
+        while (time.time() - start_time) < timeout:
+            if self.check_mcee_ready():
+                print("  ✓ MCEE detecte et pret !")
+                return True
+
+            remaining = timeout - (time.time() - start_time)
+            print(f"  ⏳ MCEE non detecte, attente... ({int(remaining)}s restantes)")
+            time.sleep(check_interval)
+
+        print(f"  ✗ Timeout: MCEE non detecte apres {int(timeout)}s")
+        print("    → Lancez le MCEE dans un autre terminal: cd mcee_final/build && ./mcee")
+        return False
 
     def send_emotions_to_mcee(self, emotions: Dict[str, float]) -> bool:
         """Envoie les emotions directement au module MCEE."""
@@ -552,8 +618,13 @@ class MCEEModuleTester:
         print("OK: Format de sortie MCEE valide")
         return True
 
-    def run_all_tests(self) -> Dict:
-        """Execute tous les tests MCEE."""
+    def run_all_tests(self, wait_for_mcee_timeout: float = 10.0) -> Dict:
+        """
+        Execute tous les tests MCEE.
+
+        Args:
+            wait_for_mcee_timeout: Temps d'attente max pour le MCEE (defaut: 10s)
+        """
         start_time = time.time()
         self.results = []
 
@@ -571,19 +642,24 @@ class MCEEModuleTester:
             print(f"ECHEC: {e}")
             return {"error": "Connection failed"}
 
-        # 2. Verifier si MCEE est en cours d'execution
+        # 2. Verifier si MCEE est en cours d'execution (via les queues)
         print("\n[2/4] Verification du module MCEE...")
-        mcee_running = self.check_mcee_running()
-        if mcee_running:
-            print("OK: Les exchanges MCEE existent")
-        else:
-            print("ATTENTION: Les exchanges MCEE n'existent pas.")
-            print("          Le module MCEE doit etre demarre pour les tests complets.")
+
+        # D'abord verifier les exchanges (legacy)
+        exchanges_exist = self.check_mcee_running()
+        if exchanges_exist:
+            print("  OK: Les exchanges MCEE existent")
+
+        # Ensuite verifier les queues (plus fiable)
+        mcee_ready = self.wait_for_mcee(timeout=wait_for_mcee_timeout)
+
+        if not mcee_ready:
+            print("ATTENTION: Le module MCEE doit etre demarre pour les tests complets.")
             print("          Commande: cd mcee_final/build && ./mcee")
 
         # 3. Tester le format de sortie
         print("\n[3/4] Test du format de sortie MCEE...")
-        if mcee_running:
+        if mcee_ready:
             format_ok = self.test_mcee_output_format()
         else:
             print("SKIP: Module MCEE non disponible")
@@ -593,7 +669,7 @@ class MCEEModuleTester:
         print("\n[4/4] Tests des 8 scenarios emotionnels...")
         scenario_results = []
 
-        if mcee_running:
+        if mcee_ready:
             for name, scenario in TEST_SCENARIOS.items():
                 result = self.test_scenario(scenario)
                 scenario_results.append(result)
@@ -617,11 +693,12 @@ class MCEEModuleTester:
             print("  Tests: Non executes (MCEE non disponible)")
 
         print(f"  Duree totale: {total_duration:.1f}s")
-        print(f"  MCEE actif: {'Oui' if mcee_running else 'Non'}")
+        print(f"  MCEE actif: {'Oui' if mcee_ready else 'Non'}")
         print("=" * 70)
 
         return {
-            "mcee_running": mcee_running,
+            "mcee_ready": mcee_ready,
+            "exchanges_exist": exchanges_exist,
             "format_valid": format_ok,
             "scenario_results": scenario_results,
             "duration_seconds": total_duration
@@ -685,20 +762,31 @@ def diagnose_mcee():
         conn = pika.BlockingConnection(params)
         channel = conn.channel()
 
-    # 4. Lister les queues
-    print("\n[4] Queues RabbitMQ...")
-    try:
-        # Note: Ceci necessite le plugin management
-        print("    (Utiliser 'rabbitmqctl list_queues' pour voir les queues)")
-    except:
-        pass
+    # 4. Verifier les queues MCEE (plus fiable que les exchanges)
+    print("\n[4] Queues MCEE...")
+    mcee_queues = ["mcee_emotions_queue", "mcee_speech_queue", "mcee_tokens_queue"]
+    queues_found = 0
+
+    for queue_name in mcee_queues:
+        try:
+            channel.queue_declare(queue=queue_name, passive=True)
+            print(f"    OK: {queue_name} existe")
+            queues_found += 1
+        except pika.exceptions.ChannelClosedByBroker:
+            print(f"    ATTENTION: {queue_name} n'existe pas")
+            conn = pika.BlockingConnection(params)
+            channel = conn.channel()
 
     conn.close()
 
     print("\n" + "-" * 70)
     print("RESUME:")
-    print("  - Si les exchanges n'existent pas, demarrer MCEE:")
-    print("    cd mcee_final/build && ./mcee")
+    if queues_found >= 2:
+        print("  ✓ MCEE est demarre et pret (queues detectees)")
+    else:
+        print("  ✗ MCEE n'est pas demarre (queues non detectees)")
+        print("  - Pour demarrer MCEE:")
+        print("    cd mcee_final/build && ./mcee")
     print("  - Verifier que RabbitMQ est demarre:")
     print("    sudo systemctl status rabbitmq-server")
     print("-" * 70)
@@ -713,7 +801,8 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Mode verbose")
     parser.add_argument("--check", action="store_true", help="Verifier connexion seulement")
     parser.add_argument("--diagnose", action="store_true", help="Diagnostic complet")
-    parser.add_argument("--timeout", type=int, default=10, help="Timeout en secondes")
+    parser.add_argument("--timeout", type=int, default=10, help="Timeout reception messages (secondes)")
+    parser.add_argument("--wait-mcee", type=int, default=10, help="Timeout attente MCEE (secondes)")
     args = parser.parse_args()
 
     if args.diagnose:
@@ -722,15 +811,17 @@ def main():
 
     if args.check:
         tester = MCEEModuleTester(verbose=True)
-        mcee_ok = tester.check_mcee_running()
-        if mcee_ok:
-            print("OK: Module MCEE detecte")
+        # Utiliser check_mcee_ready() pour verifier les queues (plus fiable)
+        mcee_ready = tester.check_mcee_ready()
+        if mcee_ready:
+            print("✓ Module MCEE detecte et pret (queues existent)")
         else:
-            print("ATTENTION: Module MCEE non detecte")
+            print("✗ Module MCEE non detecte (queues n'existent pas)")
+            print("  → Lancez le MCEE: cd mcee_final/build && ./mcee")
         return
 
     tester = MCEEModuleTester(verbose=args.verbose, timeout=args.timeout)
-    results = tester.run_all_tests()
+    results = tester.run_all_tests(wait_for_mcee_timeout=args.wait_mcee)
 
 
 if __name__ == "__main__":
