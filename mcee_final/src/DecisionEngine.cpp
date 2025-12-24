@@ -282,6 +282,9 @@ MemoryContext DecisionEngine::buildMemoryContext(const SituationFrame& frame) {
         }
     }
 
+    // Enrichir avec les associations MCTGraph récentes
+    enrichWithMCTGraph(context, frame);
+
     context.timestamp = std::chrono::steady_clock::now();
     return context;
 }
@@ -940,25 +943,78 @@ std::string DecisionEngine::generateLesson(
     const DecisionOutcome& outcome,
     double prediction_error) const
 {
-    std::string lesson;
+    // ═══════════════════════════════════════════════════════════════════════
+    // Génération de leçons contextuelles enrichies
+    // ═══════════════════════════════════════════════════════════════════════
 
-    if (outcome.success) {
-        if (prediction_error > 0.3) {
-            lesson = "Succès inattendu - explorer davantage cette stratégie";
-        } else if (prediction_error < -0.3) {
-            lesson = "Succès mais résultat sous-estimé - ajuster les attentes";
+    std::string lesson;
+    std::string action_name = outcome.decision_id;
+    std::string context = last_context_type_;
+
+    // Classifier le type de résultat
+    bool surprising_positive = prediction_error > 0.3 && outcome.success;
+    bool surprising_negative = prediction_error < -0.3 && !outcome.success;
+    bool expected_success = std::abs(prediction_error) <= 0.3 && outcome.success;
+    bool expected_failure = std::abs(prediction_error) <= 0.3 && !outcome.success;
+    bool underestimated = prediction_error < -0.3 && outcome.success;
+    bool overestimated = prediction_error > 0.3 && !outcome.success;
+
+    // Templates contextuels
+    if (surprising_positive) {
+        // Succès inattendu - explorer davantage
+        if (context == "reunion" || context == "professionnel") {
+            lesson = "Surprise positive en contexte professionnel: '" + action_name +
+                     "' a mieux fonctionné qu'anticipé. Stratégie à privilégier en situation similaire.";
+        } else if (context == "projet" || context == "strategique") {
+            lesson = "Résultat stratégique meilleur que prévu avec '" + action_name +
+                     "'. Hypothèse de travail à réviser positivement.";
+        } else if (context == "personnel" || context == "emotionnel") {
+            lesson = "Effet émotionnel positif inattendu de '" + action_name +
+                     "'. Cette approche renforce la résilience.";
         } else {
-            lesson = "Stratégie validée - continuer ainsi";
+            lesson = "Succès inattendu: '" + action_name +
+                     "' surpasse les attentes. À explorer davantage.";
         }
-    } else {
-        if (prediction_error < -0.3) {
-            lesson = "Échec significatif - éviter cette approche dans ce contexte";
-        } else if (prediction_error > 0.3) {
-            lesson = "Échec modéré mais prédit - améliorer l'exécution";
+
+    } else if (surprising_negative) {
+        // Échec inattendu - analyser les facteurs
+        if (context == "reunion" || context == "professionnel") {
+            lesson = "Alerte: '" + action_name +
+                     "' a échoué malgré les prévisions favorables. Revoir les signaux ignorés.";
+        } else if (context == "projet" || context == "strategique") {
+            lesson = "Échec stratégique significatif avec '" + action_name +
+                     "'. Biais d'optimisme détecté - réviser le cadre d'analyse.";
+        } else if (context == "personnel" || context == "emotionnel") {
+            lesson = "Impact émotionnel négatif de '" + action_name +
+                     "'. Mécanisme de protection à renforcer.";
         } else {
-            lesson = "Résultat mitigé - analyser les conditions";
+            lesson = "Échec significatif: éviter '" + action_name +
+                     "' dans ce type de contexte à l'avenir.";
         }
+
+    } else if (expected_success) {
+        // Succès conforme aux attentes - consolider
+        lesson = "Stratégie '" + action_name + "' validée en contexte '" + context +
+                 "'. Pattern fiable à conserver.";
+
+    } else if (expected_failure) {
+        // Échec attendu - tirer les conclusions
+        lesson = "Résultat mitigé avec '" + action_name +
+                 "'. Analyser si les conditions étaient propices avant de rejeter.";
+
+    } else if (underestimated) {
+        // Résultat meilleur que prévu même si succès
+        lesson = "Modèle de prédiction trop conservateur pour '" + action_name +
+                 "'. Ajuster les attentes à la hausse pour ce contexte.";
+
+    } else if (overestimated) {
+        // Échec alors qu'on attendait mieux
+        lesson = "Surestimation détectée: '" + action_name +
+                 "' moins efficace que modélisé. Affiner les critères d'évaluation.";
     }
+
+    // Ajouter métrique de confiance
+    lesson += " [δ=" + std::to_string(prediction_error).substr(0, 5) + "]";
 
     return lesson;
 }
@@ -1003,6 +1059,89 @@ void DecisionEngine::setMetaActionCallback(MetaActionCallback callback) {
 
 void DecisionEngine::setConflictCallback(ConflictCallback callback) {
     on_conflict_ = std::move(callback);
+}
+
+void DecisionEngine::setMCTGraph(std::shared_ptr<MCTGraph> mct_graph) {
+    mct_graph_ = std::move(mct_graph);
+    std::cout << "[Decision] MCTGraph connecté pour enrichissement mémoriel\n";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENRICHISSEMENT MCTGraph → MemoryContext
+// ═══════════════════════════════════════════════════════════════════════════
+
+void DecisionEngine::enrichWithMCTGraph(MemoryContext& context, const SituationFrame& frame) {
+    if (!mct_graph_) {
+        return;  // Pas de MCTGraph connecté
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. Récupérer les associations causales récentes (mots → émotions)
+    // ─────────────────────────────────────────────────────────────────────────
+    auto causal_analyses = mct_graph_->analyzeCausality();
+
+    for (const auto& analysis : causal_analyses) {
+        // Créer un pattern MLT à partir des associations MCTGraph
+        if (analysis.causal_strength > 0.5 && analysis.trigger_count >= 2) {
+            // Association significative → ajouter comme pattern
+            std::string pattern = "MCT:" + analysis.word_lemma +
+                                  "→emo(x" + std::to_string(analysis.trigger_count) + ")";
+            context.patterns.push_back(pattern);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. Récupérer les mots-déclencheurs pour les émotions actuelles
+    // ─────────────────────────────────────────────────────────────────────────
+    // Trouver l'émotion dominante actuelle
+    std::string dominant_emotion;
+    double max_intensity = 0.0;
+
+    std::vector<std::string> emotion_names = {"Joie", "Peur", "Colère", "Tristesse",
+                                               "Surprise", "Dégoût", "Anxiété", "Frustration"};
+    for (const auto& emo_name : emotion_names) {
+        double intensity = frame.emotional_state.getEmotion(emo_name);
+        if (intensity > max_intensity) {
+            max_intensity = intensity;
+            dominant_emotion = emo_name;
+        }
+    }
+
+    // Si intensité significative, chercher les mots déclencheurs récents
+    if (max_intensity > 0.4) {
+        // Parcourir les analyses causales pour trouver les mots liés
+        for (const auto& analysis : causal_analyses) {
+            if (analysis.causal_strength > 0.3) {
+                // Créer un concept sémantique à partir du mot déclencheur
+                SemanticConcept trigger_concept;
+                trigger_concept.name = "trigger:" + analysis.word_lemma;
+                trigger_concept.relevance = analysis.causal_strength;
+                trigger_concept.associations.push_back(dominant_emotion);
+                trigger_concept.associations.push_back("récent");
+
+                context.concepts.push_back(trigger_concept);
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. Ajouter les statistiques du graphe comme contexte
+    // ─────────────────────────────────────────────────────────────────────────
+    size_t word_count = mct_graph_->getWordCount();
+    size_t emotion_count = mct_graph_->getEmotionCount();
+    size_t causal_count = mct_graph_->getCausalEdgeCount();
+
+    if (word_count > 0 || emotion_count > 0) {
+        std::string graph_pattern = "MCT:graph(" +
+            std::to_string(word_count) + "w," +
+            std::to_string(emotion_count) + "e," +
+            std::to_string(causal_count) + "c)";
+        context.patterns.push_back(graph_pattern);
+    }
+
+    std::cout << "[Decision] MCTGraph: " << causal_analyses.size()
+              << " associations causales, " << context.patterns.size()
+              << " patterns ajoutés\n";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
