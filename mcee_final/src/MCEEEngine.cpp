@@ -163,11 +163,30 @@ void MCEEEngine::initMemorySystem() {
         std::cout << "[ADDO] ⚡ Objectif d'urgence: " << emergency_goal << "\n";
     });
 
+    // Créer le module de Prise de Décision Réfléchie
+    DecisionConfig decision_config;
+    decision_config.tau_max_ms = 5000.0;
+    decision_config.theta_veto = 0.80;
+    decision_config.enable_meta_actions = true;
+    decision_engine_ = std::make_shared<DecisionEngine>(decision_config);
+
+    // Configurer les callbacks Decision
+    decision_engine_->setDecisionCallback([](const DecisionResult& result) {
+        std::cout << "[Decision] D(t)=" << result.action_name
+                  << " κ=" << std::fixed << std::setprecision(2) << result.confidence
+                  << (result.is_meta_action ? " [META]" : "") << "\n";
+    });
+
+    decision_engine_->setVetoCallback([](const ActionOption& option, const std::string& reason) {
+        std::cout << "[Decision] ⛔ Veto: " << option.name << " (" << reason << ")\n";
+    });
+
     std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
     std::cout << "[MCEEEngine] MCTGraph: fenêtre=" << graph_config.time_window_seconds << "s\n";
     std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
     std::cout << "[MCEEEngine] ConscienceEngine initialisé (Wt=" << conscience_engine_->getWisdom() << ")\n";
     std::cout << "[MCEEEngine] ADDOEngine initialisé (Rs=" << addo_engine_->getResilience() << ")\n";
+    std::cout << "[MCEEEngine] DecisionEngine initialisé (τ_max=" << decision_config.tau_max_ms << "ms)\n";
 }
 
 void MCEEEngine::setupCallbacks() {
@@ -1233,6 +1252,28 @@ GoalState MCEEEngine::getGoalState() const {
         return addo_engine_->getCurrentState();
     }
     return GoalState{};
+}
+
+DecisionResult MCEEEngine::makeDecision(
+    const std::string& context_type,
+    const std::vector<ActionOption>& available_actions)
+{
+    if (!decision_engine_) {
+        return DecisionResult{};
+    }
+
+    // Récupérer les états actuels
+    ConscienceSentimentState conscience_state = getConscienceState();
+    GoalState goal_state = getGoalState();
+
+    // Déléguer au DecisionEngine
+    return decision_engine_->decide(
+        current_state_,
+        conscience_state,
+        goal_state,
+        context_type,
+        available_actions
+    );
 }
 
 } // namespace mcee
