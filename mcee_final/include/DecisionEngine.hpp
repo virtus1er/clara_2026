@@ -16,6 +16,7 @@
 #include "DecisionConfig.hpp"
 #include "ConscienceConfig.hpp"
 #include "ADDOConfig.hpp"
+#include "MCTGraph.hpp"
 #include "Types.hpp"
 #include <memory>
 #include <vector>
@@ -248,8 +249,17 @@ public:
     void setMetaActionCallback(MetaActionCallback callback);
     void setConflictCallback(ConflictCallback callback);
 
+    /**
+     * @brief Connecte le MCTGraph pour enrichir le contexte mémoriel
+     * @param mct_graph Pointeur vers le MCTGraph (associations récentes)
+     */
+    void setMCTGraph(std::shared_ptr<MCTGraph> mct_graph);
+
 private:
     DecisionConfig config_;
+
+    // Connexion au MCTGraph pour associations récentes
+    std::shared_ptr<MCTGraph> mct_graph_;
 
     // Mémoires internes (simplifiées)
     std::vector<MemoryEpisode> episodes_;
@@ -336,6 +346,12 @@ private:
      * @brief Met à jour l'historique
      */
     void updateHistory(const DecisionResult& result);
+
+    /**
+     * @brief Enrichit le contexte mémoriel avec les associations MCTGraph
+     * Ajoute les mots-déclencheurs récents et patterns non-consolidés
+     */
+    void enrichWithMCTGraph(MemoryContext& context, const SituationFrame& frame);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Apprentissage post-décision (Table 3 du PDF)
