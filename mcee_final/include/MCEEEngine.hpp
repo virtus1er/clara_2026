@@ -307,8 +307,12 @@ private:
     double wisdom_ = 0.0;
     MCEEStats stats_;
 
-    // RabbitMQ
-    AmqpClient::Channel::ptr_t channel_;
+    // RabbitMQ - Channels séparés pour éviter le blocage entre consumers
+    // Note: AmqpClient::Channel n'est PAS thread-safe, chaque thread doit avoir son propre channel
+    AmqpClient::Channel::ptr_t emotions_channel_;   // Channel dédié consommation émotions
+    AmqpClient::Channel::ptr_t speech_channel_;     // Channel dédié consommation parole
+    AmqpClient::Channel::ptr_t tokens_channel_;     // Channel dédié consommation tokens
+    AmqpClient::Channel::ptr_t publish_channel_;    // Channel dédié publications (état + snapshots)
     std::string emotions_consumer_tag_;
     std::string speech_consumer_tag_;
     std::string tokens_consumer_tag_;

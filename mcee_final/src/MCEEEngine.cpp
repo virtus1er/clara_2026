@@ -330,89 +330,94 @@ bool MCEEEngine::initRabbitMQ() {
         opts.host = rabbitmq_config_.host;
         opts.port = rabbitmq_config_.port;
         opts.auth = AmqpClient::Channel::OpenOpts::BasicAuth{
-            rabbitmq_config_.user, 
+            rabbitmq_config_.user,
             rabbitmq_config_.password
         };
 
-        channel_ = AmqpClient::Channel::Open(opts);
+        // === Créer 4 channels séparés (thread-safety) ===
+        // AmqpClient::Channel n'est PAS thread-safe, chaque thread doit avoir son propre channel
+        emotions_channel_ = AmqpClient::Channel::Open(opts);
+        speech_channel_ = AmqpClient::Channel::Open(opts);
+        tokens_channel_ = AmqpClient::Channel::Open(opts);
+        publish_channel_ = AmqpClient::Channel::Open(opts);
 
-        // === Exchanges ===
-        
+        // === Déclarer les exchanges sur le channel de publication ===
+
         // Exchange pour les émotions (entrée)
-        channel_->DeclareExchange(
+        publish_channel_->DeclareExchange(
             rabbitmq_config_.emotions_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
         // Exchange pour la parole (entrée)
-        channel_->DeclareExchange(
+        publish_channel_->DeclareExchange(
             rabbitmq_config_.speech_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
         // Exchange pour la sortie
-        channel_->DeclareExchange(
+        publish_channel_->DeclareExchange(
             rabbitmq_config_.output_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
-        // === Queues ===
-        
-        // Queue pour les émotions
-        std::string emotions_queue = channel_->DeclareQueue(
-            "mcee_emotions_queue", false, true, false, false
-        );
-        channel_->BindQueue(
-            emotions_queue,
-            rabbitmq_config_.emotions_exchange,
-            rabbitmq_config_.emotions_routing_key
-        );
-        emotions_consumer_tag_ = channel_->BasicConsume(
-            emotions_queue, "", true, false, false, 1
-        );
-
-        // Queue pour la parole
-        std::string speech_queue = channel_->DeclareQueue(
-            "mcee_speech_queue", false, true, false, false
-        );
-        channel_->BindQueue(
-            speech_queue,
-            rabbitmq_config_.speech_exchange,
-            rabbitmq_config_.speech_routing_key
-        );
-        speech_consumer_tag_ = channel_->BasicConsume(
-            speech_queue, "", true, false, false, 1
-        );
-
-        // Exchange et queue pour les tokens Neo4j/spaCy
-        channel_->DeclareExchange(
-            rabbitmq_config_.tokens_exchange,
-            AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
-            false, true, false
-        );
-        std::string tokens_queue = channel_->DeclareQueue(
-            "mcee_tokens_queue", false, true, false, false
-        );
-        channel_->BindQueue(
-            tokens_queue,
-            rabbitmq_config_.tokens_exchange,
-            rabbitmq_config_.tokens_routing_key
-        );
-        tokens_consumer_tag_ = channel_->BasicConsume(
-            tokens_queue, "", true, false, false, 1
-        );
-
         // Exchange pour les snapshots MCTGraph (sortie vers module rêves)
-        channel_->DeclareExchange(
+        publish_channel_->DeclareExchange(
             rabbitmq_config_.snapshot_exchange,
             AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
             false, true, false
         );
 
-        std::cout << "[MCEEEngine] Connexion RabbitMQ établie" << std::endl;
+        // Exchange pour les tokens Neo4j/spaCy
+        publish_channel_->DeclareExchange(
+            rabbitmq_config_.tokens_exchange,
+            AmqpClient::Channel::EXCHANGE_TYPE_TOPIC,
+            false, true, false
+        );
+
+        // === Configurer le channel émotions ===
+        std::string emotions_queue = emotions_channel_->DeclareQueue(
+            "mcee_emotions_queue", false, true, false, false
+        );
+        emotions_channel_->BindQueue(
+            emotions_queue,
+            rabbitmq_config_.emotions_exchange,
+            rabbitmq_config_.emotions_routing_key
+        );
+        emotions_consumer_tag_ = emotions_channel_->BasicConsume(
+            emotions_queue, "", true, false, false, 1
+        );
+
+        // === Configurer le channel parole ===
+        std::string speech_queue = speech_channel_->DeclareQueue(
+            "mcee_speech_queue", false, true, false, false
+        );
+        speech_channel_->BindQueue(
+            speech_queue,
+            rabbitmq_config_.speech_exchange,
+            rabbitmq_config_.speech_routing_key
+        );
+        speech_consumer_tag_ = speech_channel_->BasicConsume(
+            speech_queue, "", true, false, false, 1
+        );
+
+        // === Configurer le channel tokens ===
+        std::string tokens_queue = tokens_channel_->DeclareQueue(
+            "mcee_tokens_queue", false, true, false, false
+        );
+        tokens_channel_->BindQueue(
+            tokens_queue,
+            rabbitmq_config_.tokens_exchange,
+            rabbitmq_config_.tokens_routing_key
+        );
+        tokens_consumer_tag_ = tokens_channel_->BasicConsume(
+            tokens_queue, "", true, false, false, 1
+        );
+
+        std::cout << "[MCEEEngine] Connexion RabbitMQ établie (4 channels)" << std::endl;
         std::cout << "[MCEEEngine] Queues créées: emotions + speech + tokens" << std::endl;
         std::cout << "[MCEEEngine] Exchange snapshot: " << rabbitmq_config_.snapshot_exchange << std::endl;
         return true;
@@ -429,14 +434,14 @@ void MCEEEngine::emotionsConsumeLoop() {
     while (running_.load()) {
         try {
             AmqpClient::Envelope::ptr_t envelope;
-            bool received = channel_->BasicConsumeMessage(emotions_consumer_tag_, envelope, 500);
+            bool received = emotions_channel_->BasicConsumeMessage(emotions_consumer_tag_, envelope, 500);
 
             if (received && envelope) {
                 std::string body(envelope->Message()->Body().begin(),
                                 envelope->Message()->Body().end());
-                
+
                 handleEmotionMessage(body);
-                channel_->BasicAck(envelope);
+                emotions_channel_->BasicAck(envelope);
             }
 
         } catch (const std::exception& e) {
@@ -452,14 +457,14 @@ void MCEEEngine::speechConsumeLoop() {
     while (running_.load()) {
         try {
             AmqpClient::Envelope::ptr_t envelope;
-            bool received = channel_->BasicConsumeMessage(speech_consumer_tag_, envelope, 500);
+            bool received = speech_channel_->BasicConsumeMessage(speech_consumer_tag_, envelope, 500);
 
             if (received && envelope) {
                 std::string body(envelope->Message()->Body().begin(),
                                 envelope->Message()->Body().end());
-                
+
                 handleSpeechMessage(body);
-                channel_->BasicAck(envelope);
+                speech_channel_->BasicAck(envelope);
             }
 
         } catch (const std::exception& e) {
@@ -731,7 +736,7 @@ void MCEEEngine::printState() const {
 }
 
 void MCEEEngine::publishState() {
-    if (!channel_) return;
+    if (!publish_channel_) return;
 
     try {
         json output;
@@ -802,7 +807,7 @@ void MCEEEngine::publishState() {
         }
 
         std::string body = output.dump();
-        channel_->BasicPublish(
+        publish_channel_->BasicPublish(
             rabbitmq_config_.output_exchange,
             rabbitmq_config_.output_routing_key,
             AmqpClient::BasicMessage::Create(body),
@@ -1101,14 +1106,14 @@ void MCEEEngine::tokensConsumeLoop() {
     while (running_.load()) {
         try {
             AmqpClient::Envelope::ptr_t envelope;
-            bool received = channel_->BasicConsumeMessage(tokens_consumer_tag_, envelope, 500);
+            bool received = tokens_channel_->BasicConsumeMessage(tokens_consumer_tag_, envelope, 500);
 
             if (received && envelope) {
                 std::string body(envelope->Message()->Body().begin(),
                                 envelope->Message()->Body().end());
 
                 handleTokensMessage(body);
-                channel_->BasicAck(envelope);
+                tokens_channel_->BasicAck(envelope);
             }
 
         } catch (const std::exception& e) {
@@ -1212,7 +1217,7 @@ void MCEEEngine::handleTokensMessage(const std::string& body) {
 }
 
 void MCEEEngine::publishSnapshot(const MCTGraphSnapshot& snapshot) {
-    if (!channel_) return;
+    if (!publish_channel_) return;
 
     try {
         json output = snapshot.toJson();
@@ -1223,7 +1228,7 @@ void MCEEEngine::publishSnapshot(const MCTGraphSnapshot& snapshot) {
         output["pattern_confidence"] = current_match_.confidence;
 
         std::string body = output.dump();
-        channel_->BasicPublish(
+        publish_channel_->BasicPublish(
             rabbitmq_config_.snapshot_exchange,
             rabbitmq_config_.snapshot_routing_key,
             AmqpClient::BasicMessage::Create(body),
