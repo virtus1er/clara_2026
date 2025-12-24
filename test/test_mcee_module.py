@@ -354,8 +354,13 @@ class MCEEModuleTester:
             self.log(f"Erreur envoi emotions: {e}", "ERROR")
             return False
 
-    def receive_mcee_state(self, timeout: int = None) -> Optional[Dict[str, Any]]:
-        """Recoit l'etat traite par le MCEE."""
+    def receive_mcee_state(self, timeout: int = None, ready_event: threading.Event = None) -> Optional[Dict[str, Any]]:
+        """Recoit l'etat traite par le MCEE.
+
+        Args:
+            timeout: Timeout en secondes
+            ready_event: Event a signaler quand le receiver est pret (queue bindee)
+        """
         if timeout is None:
             timeout = self.timeout
 
@@ -400,6 +405,10 @@ class MCEEModuleTester:
                 auto_ack=True
             )
 
+            # Signaler que le receiver est pret (queue bindee, pret a recevoir)
+            if ready_event:
+                ready_event.set()
+
             # Timeout
             conn.call_later(timeout, lambda: channel.stop_consuming())
 
@@ -410,6 +419,9 @@ class MCEEModuleTester:
 
         except Exception as e:
             self.log(f"Erreur reception etat: {e}", "ERROR")
+            # Signaler meme en cas d'erreur pour debloquer le thread principal
+            if ready_event:
+                ready_event.set()
             return None
 
     def test_scenario(self, scenario: EmotionScenario) -> MCEETestResult:
@@ -424,15 +436,18 @@ class MCEEModuleTester:
         # Demarrer le recepteur en arriere-plan
         state_result = [None]
         receiver_done = threading.Event()
+        receiver_ready = threading.Event()  # Signale quand le receiver est pret
 
         def receiver_thread():
-            state_result[0] = self.receive_mcee_state()
+            state_result[0] = self.receive_mcee_state(ready_event=receiver_ready)
             receiver_done.set()
 
         thread = threading.Thread(target=receiver_thread)
         thread.start()
 
-        time.sleep(0.5)  # Laisser le recepteur se connecter
+        # Attendre que le receiver soit vraiment pret (queue bindee)
+        if not receiver_ready.wait(timeout=5.0):
+            self.log("Timeout en attendant que le receiver soit pret", "ERROR")
 
         # Envoyer les emotions
         if not self.send_emotions_to_mcee(scenario.emotions):
@@ -512,14 +527,19 @@ class MCEEModuleTester:
 
         state_result = [None]
         done = threading.Event()
+        ready = threading.Event()
 
         def receiver():
-            state_result[0] = self.receive_mcee_state(timeout=5)
+            state_result[0] = self.receive_mcee_state(timeout=5, ready_event=ready)
             done.set()
 
         thread = threading.Thread(target=receiver)
         thread.start()
-        time.sleep(0.3)
+
+        # Attendre que le receiver soit vraiment pret
+        if not ready.wait(timeout=5.0):
+            print("ECHEC: Timeout en attendant que le receiver soit pret")
+            return False
 
         self.send_emotions_to_mcee(scenario.emotions)
         done.wait(timeout=6)
