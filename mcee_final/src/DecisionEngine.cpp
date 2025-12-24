@@ -11,6 +11,7 @@
 #include <cmath>
 #include <iostream>
 #include <iomanip>
+#include <map>
 
 namespace mcee {
 
@@ -43,6 +44,10 @@ DecisionResult DecisionEngine::decide(
     auto start_time = std::chrono::steady_clock::now();
 
     total_decisions_++;
+
+    // Sauvegarder l'état pour l'apprentissage post-décision
+    last_context_type_ = context_type;
+    last_emotional_state_ = emotional_state;
 
     // ═══════════════════════════════════════════════════════════════════════
     // PHASE 1 : PERCEPTION → Σ(t)
@@ -297,7 +302,7 @@ void DecisionEngine::addConcept(const SemanticConcept& semantic_concept) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PHASE 3 : GÉNÉRATION & SIMULATION
+// PHASE 3 : GÉNÉRATION & SIMULATION (Two-Pass)
 // ═══════════════════════════════════════════════════════════════════════════
 
 std::vector<ActionOption> DecisionEngine::generateOptions(
@@ -305,13 +310,33 @@ std::vector<ActionOption> DecisionEngine::generateOptions(
     const MemoryContext& memory,
     const GoalState& goals)
 {
-    std::vector<ActionOption> options;
+    // ═══════════════════════════════════════════════════════════════════════
+    // Génération en deux temps (PDF) :
+    // 1. Macro-options : familles d'actions de haut niveau
+    // 2. Raffinement top-k : expansion des meilleures familles
+    // ═══════════════════════════════════════════════════════════════════════
 
-    // Générer options par défaut selon le contexte
-    auto default_opts = generateDefaultOptions(frame.context_type);
-    options.insert(options.end(), default_opts.begin(), default_opts.end());
+    // ─────────────────────────────────────────────────────────────────────────
+    // Passe 1 : Générer les macro-options (familles d'actions)
+    // ─────────────────────────────────────────────────────────────────────────
+    std::vector<std::string> macro_options = generateMacroOptions(frame, memory);
 
-    // Ajouter méta-action InfoRequest si activée
+    std::cout << "[Decision] Passe 1: " << macro_options.size()
+              << " macro-options générées\n";
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Passe 2 : Raffiner les top-k macro-options
+    // ─────────────────────────────────────────────────────────────────────────
+    std::vector<ActionOption> options = refineMacroOptions(
+        macro_options, frame, goals, config_.top_k_refinement
+    );
+
+    std::cout << "[Decision] Passe 2: " << options.size()
+              << " options raffinées\n";
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Ajouter méta-actions si activées
+    // ─────────────────────────────────────────────────────────────────────────
     if (config_.enable_meta_actions) {
         ActionOption info_request;
         info_request.id = "meta_info_request";
@@ -320,6 +345,13 @@ std::vector<ActionOption> DecisionEngine::generateOptions(
         info_request.meta_type = MetaActionType::QUESTION;
         info_request.meta_target = "clarification";
         options.push_back(info_request);
+
+        ActionOption observe;
+        observe.id = "meta_observe";
+        observe.name = "Observer passivement";
+        observe.category = "meta";
+        observe.meta_type = MetaActionType::OBSERVE;
+        options.push_back(observe);
 
         ActionOption defer;
         defer.id = "meta_defer";
@@ -330,6 +362,170 @@ std::vector<ActionOption> DecisionEngine::generateOptions(
     }
 
     return options;
+}
+
+std::vector<std::string> DecisionEngine::generateMacroOptions(
+    const SituationFrame& frame,
+    const MemoryContext& memory)
+{
+    std::vector<std::string> macros;
+
+    // Macro-options universelles
+    macros.push_back("agir");           // Action directe
+    macros.push_back("attendre");       // Temporisation
+    macros.push_back("communiquer");    // Échange verbal
+    macros.push_back("proteger");       // Auto-protection
+
+    // Macro-options contextuelles
+    if (frame.context_type == "reunion" || frame.context_type == "professionnel") {
+        macros.push_back("negocier");       // Négociation
+        macros.push_back("collaborer");     // Collaboration
+        macros.push_back("desamorcer");     // Désescalade
+    } else if (frame.context_type == "projet" || frame.context_type == "strategique") {
+        macros.push_back("planifier");      // Planification
+        macros.push_back("deleguer");       // Délégation
+        macros.push_back("pivoter");        // Changement de direction
+    } else if (frame.context_type == "personnel" || frame.context_type == "emotionnel") {
+        macros.push_back("exprimer");       // Expression émotionnelle
+        macros.push_back("reflechir");      // Introspection
+        macros.push_back("soutenir");       // Support
+    }
+
+    // Ajouter macro-options basées sur la mémoire
+    for (const auto& proc : memory.procedures) {
+        if (proc.success_rate > 0.7 && proc.activation_count > 3) {
+            // Procédure éprouvée → créer macro-option
+            bool already_present = false;
+            for (const auto& m : macros) {
+                if (m == proc.trigger_context) {
+                    already_present = true;
+                    break;
+                }
+            }
+            if (!already_present && macros.size() < config_.max_macro_options) {
+                macros.push_back(proc.name);
+            }
+        }
+    }
+
+    // Limiter au max configuré
+    if (macros.size() > config_.max_macro_options) {
+        macros.resize(config_.max_macro_options);
+    }
+
+    return macros;
+}
+
+std::vector<ActionOption> DecisionEngine::refineMacroOptions(
+    const std::vector<std::string>& macro_options,
+    const SituationFrame& frame,
+    const GoalState& goals,
+    size_t top_k)
+{
+    std::vector<ActionOption> refined;
+
+    // Table de mapping macro → actions concrètes
+    std::map<std::string, std::vector<std::pair<std::string, std::string>>> expansions = {
+        {"agir", {
+            {"act_execute", "Exécuter immédiatement"},
+            {"act_initiate", "Initier l'action"},
+            {"act_intervene", "Intervenir directement"}
+        }},
+        {"attendre", {
+            {"act_wait", "Attendre le bon moment"},
+            {"act_pause", "Faire une pause"},
+            {"act_observe", "Observer les développements"}
+        }},
+        {"communiquer", {
+            {"act_inform", "Informer les parties prenantes"},
+            {"act_clarify", "Clarifier la situation"},
+            {"act_negotiate", "Négocier les termes"}
+        }},
+        {"proteger", {
+            {"act_protect", "Se protéger"},
+            {"act_retreat", "Se retirer prudemment"},
+            {"act_shield", "Protéger les acquis"}
+        }},
+        {"negocier", {
+            {"act_propose", "Proposer un compromis"},
+            {"act_counter", "Contre-proposer"},
+            {"act_concede", "Faire une concession tactique"}
+        }},
+        {"collaborer", {
+            {"act_team_up", "S'associer"},
+            {"act_delegate", "Déléguer une partie"},
+            {"act_share", "Partager les responsabilités"}
+        }},
+        {"desamorcer", {
+            {"act_humor", "Désamorcer par l'humour"},
+            {"act_calm", "Recadrer calmement"},
+            {"act_redirect", "Rediriger la conversation"}
+        }},
+        {"planifier", {
+            {"act_plan", "Élaborer un plan"},
+            {"act_pilot", "Lancer un pilote"},
+            {"act_phase", "Phasage progressif"}
+        }},
+        {"exprimer", {
+            {"act_express", "Exprimer son ressenti"},
+            {"act_share_feeling", "Partager ses émotions"},
+            {"act_assert", "S'affirmer positivement"}
+        }}
+    };
+
+    // Scorer les macro-options selon l'alignement avec les objectifs
+    std::vector<std::pair<double, std::string>> scored_macros;
+    for (const auto& macro : macro_options) {
+        double score = 0.5;  // Base
+
+        // Bonus selon le contexte émotionnel
+        if (macro == "proteger" && frame.urgency > 0.6) {
+            score += 0.3;
+        }
+        if (macro == "attendre" && frame.Ft < 0) {
+            score += 0.2;  // Prudence si fond affectif négatif
+        }
+        if (macro == "agir" && frame.Ft > 0.3) {
+            score += 0.2;  // Action si fond affectif positif
+        }
+        if (macro == "communiquer" && frame.Ct > 0.5) {
+            score += 0.15;  // Communication si conscience élevée
+        }
+
+        scored_macros.push_back({score, macro});
+    }
+
+    // Trier par score décroissant
+    std::sort(scored_macros.begin(), scored_macros.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+
+    // Prendre les top-k et les raffiner
+    size_t count = std::min(top_k, scored_macros.size());
+    for (size_t i = 0; i < count; ++i) {
+        const std::string& macro = scored_macros[i].second;
+
+        auto it = expansions.find(macro);
+        if (it != expansions.end()) {
+            // Expansion trouvée → ajouter les actions
+            for (const auto& [id, name] : it->second) {
+                ActionOption opt;
+                opt.id = id;
+                opt.name = name;
+                opt.category = macro;
+                opt.description = "Action de type: " + macro;
+                refined.push_back(opt);
+            }
+        } else {
+            // Pas d'expansion → créer action générique
+            ActionOption opt;
+            opt.id = "act_" + macro;
+            opt.name = "Action: " + macro;
+            opt.category = macro;
+            refined.push_back(opt);
+        }
+    }
+
+    return refined;
 }
 
 ActionProjection DecisionEngine::projectAction(
@@ -570,42 +766,201 @@ DecisionResult DecisionEngine::selectBestAction(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// APPRENTISSAGE POST-DÉCISION
+// APPRENTISSAGE POST-DÉCISION (Table 3 du PDF)
 // ═══════════════════════════════════════════════════════════════════════════
 
 void DecisionEngine::recordOutcome(const DecisionOutcome& outcome) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Mettre à jour les procédures
-    for (auto& proc : procedures_) {
-        if (proc.name == outcome.decision_id || proc.id == outcome.decision_id) {
-            proc.activation_count++;
-            if (outcome.success) {
-                proc.success_rate = (proc.success_rate * (proc.activation_count - 1) + 1.0)
-                                   / proc.activation_count;
+    double prediction_error = outcome.actual_outcome - outcome.expected_outcome;
 
-                // Promouvoir en réflexe si suffisamment de succès
-                if (proc.activation_count >= static_cast<size_t>(config_.theta_automate)) {
-                    promoteToReflex(proc.id);
-                }
-            } else {
-                proc.success_rate = (proc.success_rate * (proc.activation_count - 1))
-                                   / proc.activation_count;
-            }
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. Mise à jour MLT : Renforcement des patterns émotionnels
+    // ─────────────────────────────────────────────────────────────────────────
+    updateMLTPatterns(outcome, prediction_error);
 
-    // Ajouter comme nouvel épisode
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. Mise à jour MP : Procédures (taux de succès + promotion réflexe)
+    // ─────────────────────────────────────────────────────────────────────────
+    updateMPProcedures(outcome);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. Mise à jour MA : Consolidation identitaire (valeurs, attitudes)
+    // ─────────────────────────────────────────────────────────────────────────
+    updateMAIdentity(outcome);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. Mise à jour ME : Création d'épisode enrichi
+    // ─────────────────────────────────────────────────────────────────────────
     MemoryEpisode episode;
     episode.id = "ep_" + std::to_string(episodes_.size());
     episode.description = "Décision: " + outcome.decision_id;
     episode.outcome_valence = outcome.actual_outcome;
     episode.action_taken = outcome.decision_id;
-    episode.lesson = outcome.success ? "Succès" : "Échec";
+    episode.lesson = generateLesson(outcome, prediction_error);
+    episode.context_type = last_context_type_;
+    episode.emotional_state = last_emotional_state_;
+    episode.timestamp = std::chrono::steady_clock::now();
+
+    if (outcome.success) {
+        episode.success_count = 1;
+    } else {
+        episode.failure_count = 1;
+    }
+
     episodes_.push_back(episode);
 
-    std::cout << "[Decision] Outcome enregistré: " << outcome.decision_id
-              << " (success=" << outcome.success << ")\n";
+    std::cout << "[Decision] Apprentissage post-décision: " << outcome.decision_id
+              << " (success=" << outcome.success
+              << ", δ=" << std::fixed << std::setprecision(2) << prediction_error << ")\n";
+}
+
+void DecisionEngine::updateMLTPatterns(
+    const DecisionOutcome& outcome,
+    double prediction_error)
+{
+    // Table 3 - MLT : Renforcement des patterns émotionnels
+    // Si succès → renforcer les associations positives
+    // Si échec → créer/renforcer patterns d'évitement
+
+    std::string pattern_key = outcome.decision_id + "_" +
+        (outcome.success ? "success" : "failure");
+
+    // Chercher si pattern existe déjà
+    bool found = false;
+    for (auto& ep : episodes_) {
+        if (ep.action_taken == outcome.decision_id) {
+            // Renforcer le pattern existant
+            double lr = config_.learning_rate_mlt;
+            if (outcome.success) {
+                ep.success_count++;
+                ep.outcome_valence = ep.outcome_valence * (1.0 - lr) +
+                                    outcome.actual_outcome * lr;
+            } else {
+                ep.failure_count++;
+                ep.outcome_valence = ep.outcome_valence * (1.0 - lr) +
+                                    outcome.actual_outcome * lr;
+            }
+            found = true;
+        }
+    }
+
+    if (!found) {
+        std::cout << "[Decision] MLT: Nouveau pattern créé pour '"
+                  << outcome.decision_id << "'\n";
+    }
+}
+
+void DecisionEngine::updateMPProcedures(const DecisionOutcome& outcome) {
+    // Table 3 - MP : Mise à jour des procédures + promotion en réflexe
+
+    for (auto& proc : procedures_) {
+        if (proc.name == outcome.decision_id || proc.id == outcome.decision_id) {
+            proc.activation_count++;
+
+            // Mise à jour du taux de succès avec lissage
+            double lr = config_.learning_rate_mp;
+            if (outcome.success) {
+                proc.success_rate = proc.success_rate * (1.0 - lr) + 1.0 * lr;
+
+                // Vérifier promotion en réflexe
+                // Condition : θ_automate succès consécutifs ET taux > 80%
+                if (proc.activation_count >= static_cast<size_t>(config_.theta_automate) &&
+                    proc.success_rate > 0.80 &&
+                    !proc.is_reflex) {
+                    promoteToReflex(proc.id);
+                }
+            } else {
+                proc.success_rate = proc.success_rate * (1.0 - lr);
+
+                // Rétrograder si taux chute trop
+                if (proc.is_reflex && proc.success_rate < 0.50) {
+                    proc.is_reflex = false;
+                    std::cout << "[Decision] MP: Procédure rétrogradée de réflexe: "
+                              << proc.name << "\n";
+                }
+            }
+            return;
+        }
+    }
+
+    // Créer nouvelle procédure si inexistante
+    MemoryProcedure new_proc;
+    new_proc.id = "proc_" + std::to_string(procedures_.size());
+    new_proc.name = outcome.decision_id;
+    new_proc.trigger_context = last_context_type_;
+    new_proc.success_rate = outcome.success ? 1.0 : 0.0;
+    new_proc.activation_count = 1;
+    new_proc.is_reflex = false;
+    procedures_.push_back(new_proc);
+
+    std::cout << "[Decision] MP: Nouvelle procédure créée pour '"
+              << outcome.decision_id << "'\n";
+}
+
+void DecisionEngine::updateMAIdentity(const DecisionOutcome& outcome) {
+    // Table 3 - MA : Consolidation des valeurs identitaires
+    // Impact sur la mémoire autobiographique si décision significative
+
+    if (outcome.identity_impact.empty()) {
+        return;  // Pas d'impact identitaire signalé
+    }
+
+    double lr = config_.learning_rate_ma;
+
+    // Traiter l'impact sur les valeurs
+    // Format attendu : "valeur:+/-delta" (ex: "intégrité:+0.1")
+    std::string impact = outcome.identity_impact;
+    size_t colon_pos = impact.find(':');
+
+    if (colon_pos != std::string::npos) {
+        std::string value_name = impact.substr(0, colon_pos);
+        std::string delta_str = impact.substr(colon_pos + 1);
+
+        try {
+            double delta = std::stod(delta_str);
+
+            // Renforcer ou affaiblir la valeur correspondante
+            if (outcome.success) {
+                // Succès → consolider la valeur
+                std::cout << "[Decision] MA: Consolidation valeur '"
+                          << value_name << "' +" << (lr * std::abs(delta)) << "\n";
+            } else {
+                // Échec → remettre en question
+                std::cout << "[Decision] MA: Remise en question valeur '"
+                          << value_name << "' -" << (lr * std::abs(delta)) << "\n";
+            }
+        } catch (...) {
+            // Format invalide, ignorer
+        }
+    }
+}
+
+std::string DecisionEngine::generateLesson(
+    const DecisionOutcome& outcome,
+    double prediction_error) const
+{
+    std::string lesson;
+
+    if (outcome.success) {
+        if (prediction_error > 0.3) {
+            lesson = "Succès inattendu - explorer davantage cette stratégie";
+        } else if (prediction_error < -0.3) {
+            lesson = "Succès mais résultat sous-estimé - ajuster les attentes";
+        } else {
+            lesson = "Stratégie validée - continuer ainsi";
+        }
+    } else {
+        if (prediction_error < -0.3) {
+            lesson = "Échec significatif - éviter cette approche dans ce contexte";
+        } else if (prediction_error > 0.3) {
+            lesson = "Échec modéré mais prédit - améliorer l'exécution";
+        } else {
+            lesson = "Résultat mitigé - analyser les conditions";
+        }
+    }
+
+    return lesson;
 }
 
 void DecisionEngine::promoteToReflex(const std::string& procedure_id) {
@@ -658,20 +1013,92 @@ double DecisionEngine::computeEpisodeSimilarity(
     const MemoryEpisode& episode,
     const SituationFrame& frame) const
 {
-    // Simplification : utiliser la description
-    double sim_ctx = 0.3;  // Base
-    double sim_emo = 0.3;  // Base
-    double sim_temp = 0.2; // Base
+    // ═══════════════════════════════════════════════════════════════════════
+    // Équation 2 du PDF :
+    // sim(episode, Σ(t)) = α·sim_ctx + β·sim_emo + γ·sim_temp
+    // ═══════════════════════════════════════════════════════════════════════
 
-    return config_.alpha_ctx * sim_ctx +
-           config_.beta_emo * sim_emo +
-           config_.gamma_temp * sim_temp;
+    // ─────────────────────────────────────────────────────────────────────────
+    // sim_ctx : Similarité contextuelle
+    // Compare le type de contexte et les caractéristiques
+    // ─────────────────────────────────────────────────────────────────────────
+    double sim_ctx = 0.0;
+    if (episode.context_type == frame.context_type) {
+        sim_ctx = 1.0;  // Contexte identique
+    } else if ((episode.context_type == "reunion" && frame.context_type == "professionnel") ||
+               (episode.context_type == "professionnel" && frame.context_type == "reunion")) {
+        sim_ctx = 0.7;  // Contextes proches
+    } else if ((episode.context_type == "projet" && frame.context_type == "strategique") ||
+               (episode.context_type == "strategique" && frame.context_type == "projet")) {
+        sim_ctx = 0.6;  // Contextes liés
+    } else {
+        sim_ctx = 0.2;  // Contextes différents
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // sim_emo : Similarité émotionnelle
+    // Distance euclidienne normalisée entre états émotionnels
+    // ─────────────────────────────────────────────────────────────────────────
+    double emo_distance = 0.0;
+    size_t emo_count = 0;
+    const auto& ep_emo = episode.emotional_state;
+    const auto& fr_emo = frame.emotional_state;
+
+    // Comparer les émotions principales
+    std::vector<std::string> emotions = {"Joie", "Peur", "Colère", "Tristesse", "Surprise", "Dégoût"};
+    for (const auto& emo : emotions) {
+        double ep_val = ep_emo.getEmotion(emo);
+        double fr_val = fr_emo.getEmotion(emo);
+        emo_distance += (ep_val - fr_val) * (ep_val - fr_val);
+        emo_count++;
+    }
+    emo_distance = std::sqrt(emo_distance / std::max(size_t(1), emo_count));
+
+    // Convertir distance en similarité (1 - distance normalisée)
+    double sim_emo = 1.0 - std::clamp(emo_distance, 0.0, 1.0);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // sim_temp : Proximité temporelle
+    // Décroissance exponentielle avec le temps
+    // ─────────────────────────────────────────────────────────────────────────
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::hours>(
+        now - episode.timestamp
+    ).count();
+
+    // Décroissance avec demi-vie de 24h (86400 secondes)
+    double half_life_hours = 24.0;
+    double sim_temp = std::exp(-0.693 * duration / half_life_hours);
+    sim_temp = std::clamp(sim_temp, 0.0, 1.0);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Combinaison pondérée
+    // ─────────────────────────────────────────────────────────────────────────
+    double similarity = config_.alpha_ctx * sim_ctx +
+                       config_.beta_emo * sim_emo +
+                       config_.gamma_temp * sim_temp;
+
+    return std::clamp(similarity, 0.0, 1.0);
 }
 
 size_t DecisionEngine::computeSimulationDepth(double uncertainty) const {
-    if (uncertainty < 0.2) return 1;
-    if (uncertainty < 0.5) return 2;
-    return std::min(size_t(3), config_.max_simulation_depth);
+    // ═══════════════════════════════════════════════════════════════════════
+    // Équation 3 du PDF :
+    // depth = 1 + ⌊κ_threshold / uncertainty(a_i)⌋
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Éviter division par zéro
+    if (uncertainty < 0.01) {
+        return 1;  // Incertitude très faible → simulation minimale
+    }
+
+    // Calcul selon équation 3
+    size_t depth = 1 + static_cast<size_t>(std::floor(
+        config_.kappa_threshold / uncertainty
+    ));
+
+    // Borner à la profondeur max configurée
+    return std::min(depth, config_.max_simulation_depth);
 }
 
 void DecisionEngine::modulateWeights(
