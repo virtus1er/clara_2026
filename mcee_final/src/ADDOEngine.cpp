@@ -75,10 +75,16 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     current_state_.emergency_override = false;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 1. Mettre à jour les variables depuis les entrées externes
+    // 1. Appliquer le mapping émotions (24D) → variables (16)
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Sentiments ← Ft du ConscienceEngine
+    applyEmotionMapping(emotional_state);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. Mettre à jour les variables depuis les entrées externes
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Sentiments ← Ft du ConscienceEngine (surcharge le mapping si activé)
     if (config_.use_sentiment_for_S) {
         // Convertir sentiment [-1, +1] vers [0, 1]
         variables_.P[static_cast<size_t>(GoalVariable::SENTIMENTS)] =
@@ -89,11 +95,19 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     variables_.P[static_cast<size_t>(GoalVariable::SOUVENIRS_EMOTIONNELS)] =
         emotional_state.getValence();
 
-    // Mettre à jour l'influence mémoire
-    memory_influence_ = memory_influence;
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. Mettre à jour M_graph(t) depuis MCTGraph si connecté
+    // ─────────────────────────────────────────────────────────────────────────
+
+    if (mct_graph_) {
+        updateFromMCTGraph();
+    } else {
+        // Utiliser l'influence mémoire fournie en paramètre
+        memory_influence_ = memory_influence;
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 2. Adapter les poids si sagesse active
+    // 4. Adapter les poids si sagesse active
     // ─────────────────────────────────────────────────────────────────────────
 
     if (config_.use_wisdom_modulation) {
@@ -101,7 +115,7 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3. Calculer les composantes de G(t)
+    // 5. Calculer les composantes de G(t)
     // ─────────────────────────────────────────────────────────────────────────
 
     // Σ w_i(t)·P_i(t)·L_i(t)
@@ -126,7 +140,7 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     double memory_term = computeMemoryInfluence();
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 4. Calculer G(t) brut
+    // 6. Calculer G(t) brut
     // ─────────────────────────────────────────────────────────────────────────
 
     double G_raw = weighted_sum
@@ -139,14 +153,14 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     current_state_.G_raw = G_raw;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 5. Appliquer la fonction de sortie
+    // 7. Appliquer la fonction de sortie
     // ─────────────────────────────────────────────────────────────────────────
 
     double G = applyOutputFunction(G_raw);
     current_state_.G = G;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 6. Mettre à jour l'état
+    // 8. Mettre à jour l'état
     // ─────────────────────────────────────────────────────────────────────────
 
     current_state_.variables = variables_;
@@ -161,7 +175,7 @@ GoalState ADDOEngine::updateWithMemory(const EmotionalState& emotional_state,
     updateHistory(G);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. Callbacks
+    // 9. Callbacks
     // ─────────────────────────────────────────────────────────────────────────
 
     if (on_update_) {
@@ -519,6 +533,107 @@ void ADDOEngine::updateHistory(double goal) {
     while (goal_history_.size() > MAX_HISTORY_SIZE) {
         goal_history_.pop_front();
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INTÉGRATION MCTGraph
+// ═══════════════════════════════════════════════════════════════════════════
+
+void ADDOEngine::setMCTGraph(std::shared_ptr<MCTGraph> mct_graph) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    mct_graph_ = std::move(mct_graph);
+    std::cout << "[ADDO] MCTGraph connecté pour enrichissement M_graph(t)\n";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAPPING ÉMOTIONS → VARIABLES
+// ═══════════════════════════════════════════════════════════════════════════
+
+void ADDOEngine::applyEmotionMapping(const EmotionalState& emotional_state) {
+    // Accéder directement au vecteur des 24 émotions
+    const auto& emo_values = emotional_state.emotions;
+
+    // Pour chaque émotion active, appliquer son influence sur les variables
+    for (size_t emo_idx = 0; emo_idx < EmotionVariableMapping::NUM_EMOTIONS; ++emo_idx) {
+        double emotion_intensity = emo_values[emo_idx];
+
+        // Ignorer les émotions inactives (seuil minimal)
+        if (emotion_intensity < 0.05) continue;
+
+        // Appliquer l'influence sur chaque variable
+        for (size_t var_idx = 0; var_idx < NUM_GOAL_VARIABLES; ++var_idx) {
+            double weight = emotion_mapping_.weights[emo_idx][var_idx];
+
+            if (std::abs(weight) < 0.01) continue;  // Ignorer les poids négligeables
+
+            // Calculer l'influence: intensité_émotion × poids_mapping
+            double influence = emotion_intensity * weight;
+
+            // Modifier la variable avec atténuation (éviter les changements brusques)
+            double current_val = variables_.P[var_idx];
+            double delta = influence * 0.3;  // Facteur d'atténuation
+
+            // Appliquer le changement (positif ou négatif selon le poids)
+            double new_val = std::clamp(current_val + delta, 0.0, 1.0);
+            variables_.P[var_idx] = new_val;
+        }
+    }
+}
+
+void ADDOEngine::updateFromMCTGraph() {
+    if (!mct_graph_) return;
+
+    // Analyser les associations causales du graphe
+    auto causal_analysis = mct_graph_->analyzeCausality();
+
+    double S_positive = 0.0;
+    double S_negative = 0.0;
+    double T_trauma = 0.0;
+    double total_weight = 0.0;
+
+    // Parcourir les associations mot → émotion
+    for (const auto& analysis : causal_analysis) {
+        for (const auto& emotion_id : analysis.triggered_emotion_ids) {
+            auto emotion_node = mct_graph_->getEmotionNode(emotion_id);
+            if (!emotion_node) continue;
+
+            double weight = analysis.causal_strength;
+            total_weight += weight;
+
+            // Classifier selon la valence de l'émotion
+            if (emotion_node->valence > 0.2) {
+                // Émotion positive
+                S_positive += weight * emotion_node->intensity;
+            } else if (emotion_node->valence < -0.2) {
+                // Émotion négative
+                S_negative += weight * emotion_node->intensity;
+
+                // Détecter les émotions traumatiques (peur, anxiété intenses)
+                // Indices: Peur=2, Anxiété=6, Honte=10
+                const auto& emotions = emotion_node->emotions;
+                double fear = emotions[2];
+                double anxiety = emotions[6];
+                double shame = emotions[10];
+
+                if (fear > 0.7 || anxiety > 0.7 || shame > 0.6) {
+                    T_trauma += weight * std::max({fear, anxiety, shame});
+                }
+            }
+        }
+    }
+
+    // Normaliser si possible
+    if (total_weight > 0.0) {
+        S_positive /= total_weight;
+        S_negative /= total_weight;
+        T_trauma /= total_weight;
+    }
+
+    // Mettre à jour l'influence mémoire
+    memory_influence_.S_positive = S_positive;
+    memory_influence_.S_negative = S_negative;
+    memory_influence_.T_trauma = std::clamp(T_trauma, 0.0, 1.0);
+    memory_influence_.timestamp = std::chrono::steady_clock::now();
 }
 
 } // namespace mcee

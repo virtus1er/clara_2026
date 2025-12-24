@@ -13,6 +13,7 @@
 
 #include "ADDOConfig.hpp"
 #include "ConscienceConfig.hpp"
+#include "MCTGraph.hpp"
 #include "Types.hpp"
 #include <memory>
 #include <deque>
@@ -185,6 +186,26 @@ public:
      */
     [[nodiscard]] const ADDOConfig& getConfig() const { return config_; }
 
+    /**
+     * @brief Retourne le mapping émotions → variables
+     */
+    [[nodiscard]] const EmotionVariableMapping& getEmotionMapping() const { return emotion_mapping_; }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // INTÉGRATION MCTGraph
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @brief Connecte le MCTGraph pour enrichir M_graph(t)
+     * @param mct_graph Pointeur vers le graphe mot-émotion
+     */
+    void setMCTGraph(std::shared_ptr<MCTGraph> mct_graph);
+
+    /**
+     * @brief Retourne le MCTGraph connecté
+     */
+    [[nodiscard]] std::shared_ptr<MCTGraph> getMCTGraph() const { return mct_graph_; }
+
     // ═══════════════════════════════════════════════════════════════════════
     // CALLBACKS
     // ═══════════════════════════════════════════════════════════════════════
@@ -217,6 +238,10 @@ private:
     GoalState current_state_;
     GoalVariables variables_;
     InteractionMatrix interactions_;
+    EmotionVariableMapping emotion_mapping_;
+
+    // Connexion au MCTGraph pour M_graph(t)
+    std::shared_ptr<MCTGraph> mct_graph_;
 
     double resilience_;
     MemoryGraphInfluence memory_influence_;
@@ -295,6 +320,25 @@ private:
      * @brief Met à jour l'historique
      */
     void updateHistory(double goal);
+
+    /**
+     * @brief Applique le mapping émotions → variables
+     * @param emotional_state État émotionnel (24 émotions)
+     *
+     * Pour chaque émotion active, modifie les variables selon la matrice
+     * EmotionVariableMapping. L'influence est pondérée par l'intensité.
+     */
+    void applyEmotionMapping(const EmotionalState& emotional_state);
+
+    /**
+     * @brief Met à jour M_graph(t) depuis le MCTGraph connecté
+     *
+     * Extrait les associations causales récentes du graphe pour calculer:
+     * - S⁺(t) : somme pondérée des émotions positives associées aux mots
+     * - S⁻(t) : somme pondérée des émotions négatives
+     * - T_trauma : intensité des associations traumatiques
+     */
+    void updateFromMCTGraph();
 };
 
 } // namespace mcee
