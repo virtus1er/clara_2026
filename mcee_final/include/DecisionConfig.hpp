@@ -70,6 +70,19 @@ struct DecisionConfig {
     size_t max_simulation_depth = 3;     // Profondeur simulation max
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Profondeur de simulation (équation 3)
+    // depth = 1 + ⌊κ_threshold / uncertainty(a_i)⌋
+    // ─────────────────────────────────────────────────────────────────────────
+    double kappa_threshold = 0.30;       // κ pour calcul profondeur
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Apprentissage post-décision (Table 3)
+    // ─────────────────────────────────────────────────────────────────────────
+    double learning_rate_mlt = 0.05;     // Taux renforcement patterns MLT
+    double learning_rate_mp = 0.10;      // Taux mise à jour procédures MP
+    double learning_rate_ma = 0.02;      // Taux consolidation valeurs MA
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Modulation affective
     // ─────────────────────────────────────────────────────────────────────────
     double Ft_positive_exploration_boost = 0.15;   // Bonus exploration si Ft > 0
@@ -148,6 +161,15 @@ struct MemoryEpisode {
     double outcome_valence = 0.0;        // Résultat : positif/négatif
     std::string action_taken;            // Action prise à l'époque
     std::string lesson;                  // Leçon apprise
+
+    // Données pour calcul de similarité (équation 2)
+    std::string context_type;            // Contexte de l'épisode
+    EmotionalState emotional_state;      // État émotionnel lors de l'épisode
+    std::chrono::steady_clock::time_point timestamp = std::chrono::steady_clock::now();
+
+    // Compteurs pour apprentissage
+    size_t success_count = 0;
+    size_t failure_count = 0;
 };
 
 /**

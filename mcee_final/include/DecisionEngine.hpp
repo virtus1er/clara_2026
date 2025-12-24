@@ -275,6 +275,10 @@ private:
     // Générateur aléatoire
     std::mt19937 rng_;
 
+    // État pour apprentissage post-décision
+    std::string last_context_type_;
+    EmotionalState last_emotional_state_;
+
     mutable std::mutex mutex_;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -282,7 +286,8 @@ private:
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * @brief Calcule la similarité entre un épisode et la situation
+     * @brief Calcule la similarité entre un épisode et la situation (Éq. 2)
+     * sim = α·sim_ctx + β·sim_emo + γ·sim_temp
      */
     [[nodiscard]] double computeEpisodeSimilarity(
         const MemoryEpisode& episode,
@@ -290,7 +295,8 @@ private:
     ) const;
 
     /**
-     * @brief Calcule la profondeur de simulation adaptative
+     * @brief Calcule la profondeur de simulation adaptative (Éq. 3)
+     * depth = 1 + ⌊κ_threshold / uncertainty(a_i)⌋
      */
     [[nodiscard]] size_t computeSimulationDepth(double uncertainty) const;
 
@@ -309,9 +315,57 @@ private:
     );
 
     /**
+     * @brief Génère les macro-options (familles d'actions)
+     */
+    std::vector<std::string> generateMacroOptions(
+        const SituationFrame& frame,
+        const MemoryContext& memory
+    );
+
+    /**
+     * @brief Raffine les top-k macro-options en actions concrètes
+     */
+    std::vector<ActionOption> refineMacroOptions(
+        const std::vector<std::string>& macro_options,
+        const SituationFrame& frame,
+        const GoalState& goals,
+        size_t top_k
+    );
+
+    /**
      * @brief Met à jour l'historique
      */
     void updateHistory(const DecisionResult& result);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Apprentissage post-décision (Table 3 du PDF)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * @brief Met à jour les patterns MLT (mémoire long terme)
+     */
+    void updateMLTPatterns(
+        const DecisionOutcome& outcome,
+        double prediction_error
+    );
+
+    /**
+     * @brief Met à jour les procédures MP
+     */
+    void updateMPProcedures(const DecisionOutcome& outcome);
+
+    /**
+     * @brief Met à jour l'identité MA (mémoire autobiographique)
+     */
+    void updateMAIdentity(const DecisionOutcome& outcome);
+
+    /**
+     * @brief Génère une leçon à partir du résultat
+     */
+    [[nodiscard]] std::string generateLesson(
+        const DecisionOutcome& outcome,
+        double prediction_error
+    ) const;
 };
 
 } // namespace mcee
