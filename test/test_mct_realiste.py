@@ -271,8 +271,6 @@ class MCTRealisteTester:
         self.timeout = timeout
         self.results: List[TestResult] = []
         self.responses: List[MCEEResponse] = []
-        self.connection = None
-        self.channel = None
 
     def log(self, message: str, level: str = "INFO"):
         """Log un message."""
@@ -281,43 +279,44 @@ class MCTRealisteTester:
             icon = {"INFO": "ℹ", "ERROR": "✗", "SUCCESS": "✓", "WARNING": "⚠"}.get(level, "•")
             print(f"[{timestamp}] {icon} [{level}] {message}")
 
-    def connect(self) -> bool:
-        """Établit la connexion RabbitMQ."""
+    def _get_connection_params(self):
+        """Retourne les paramètres de connexion."""
+        credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+        return pika.ConnectionParameters(
+            host=RABBITMQ_HOST,
+            port=RABBITMQ_PORT,
+            credentials=credentials,
+            connection_attempts=3,
+            retry_delay=1,
+            heartbeat=600,
+            blocked_connection_timeout=300
+        )
+
+    def _new_connection(self):
+        """Crée une nouvelle connexion."""
+        return pika.BlockingConnection(self._get_connection_params())
+
+    def check_connection(self) -> bool:
+        """Vérifie la connexion RabbitMQ."""
         try:
-            credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-            params = pika.ConnectionParameters(
-                host=RABBITMQ_HOST,
-                port=RABBITMQ_PORT,
-                credentials=credentials,
-                connection_attempts=3,
-                retry_delay=1
-            )
-            self.connection = pika.BlockingConnection(params)
-            self.channel = self.connection.channel()
+            conn = self._new_connection()
+            conn.close()
             self.log("Connexion RabbitMQ établie", "SUCCESS")
             return True
         except Exception as e:
             self.log(f"Erreur connexion: {e}", "ERROR")
             return False
 
-    def disconnect(self):
-        """Ferme la connexion."""
-        if self.connection and self.connection.is_open:
-            self.connection.close()
-
     def check_mcee_ready(self) -> bool:
         """Vérifie que le MCEE est prêt."""
         try:
-            self.channel.queue_declare(queue="mcee_emotions_queue", passive=True)
-            self.channel.queue_declare(queue="mcee_speech_queue", passive=True)
+            conn = self._new_connection()
+            channel = conn.channel()
+            channel.queue_declare(queue="mcee_emotions_queue", passive=True)
+            channel.queue_declare(queue="mcee_speech_queue", passive=True)
+            conn.close()
             return True
         except pika.exceptions.ChannelClosedByBroker:
-            # Queue n'existe pas
-            self.connection = pika.BlockingConnection(pika.ConnectionParameters(
-                host=RABBITMQ_HOST, port=RABBITMQ_PORT,
-                credentials=pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-            ))
-            self.channel = self.connection.channel()
             return False
         except Exception as e:
             self.log(f"Erreur vérification MCEE: {e}", "ERROR")
@@ -340,17 +339,20 @@ class MCTRealisteTester:
         return False
 
     def send_emotions(self, emotions: Dict[str, float]) -> bool:
-        """Envoie les émotions au MCEE."""
+        """Envoie les émotions au MCEE (nouvelle connexion à chaque fois)."""
         try:
+            conn = self._new_connection()
+            channel = conn.channel()
+
             # Déclarer l'exchange
-            self.channel.exchange_declare(
+            channel.exchange_declare(
                 exchange=MCEE_INPUT_EXCHANGE,
                 exchange_type="topic",
                 durable=True
             )
 
             message = json.dumps(emotions)
-            self.channel.basic_publish(
+            channel.basic_publish(
                 exchange=MCEE_INPUT_EXCHANGE,
                 routing_key=MCEE_INPUT_ROUTING_KEY,
                 body=message,
@@ -360,15 +362,19 @@ class MCTRealisteTester:
                 )
             )
             self.log(f"Émotions envoyées ({len(emotions)} valeurs)")
+            conn.close()
             return True
         except Exception as e:
             self.log(f"Erreur envoi émotions: {e}", "ERROR")
             return False
 
     def send_speech(self, text: str, source: str = "user") -> bool:
-        """Envoie un texte au module parole."""
+        """Envoie un texte au module parole (nouvelle connexion)."""
         try:
-            self.channel.exchange_declare(
+            conn = self._new_connection()
+            channel = conn.channel()
+
+            channel.exchange_declare(
                 exchange=MCEE_SPEECH_EXCHANGE,
                 exchange_type="topic",
                 durable=True
@@ -380,7 +386,7 @@ class MCTRealisteTester:
                 "confidence": 0.95
             })
 
-            self.channel.basic_publish(
+            channel.basic_publish(
                 exchange=MCEE_SPEECH_EXCHANGE,
                 routing_key=MCEE_SPEECH_ROUTING_KEY,
                 body=message,
@@ -390,94 +396,104 @@ class MCTRealisteTester:
                 )
             )
             self.log(f"Parole envoyée: '{text[:50]}...'")
+            conn.close()
             return True
         except Exception as e:
             self.log(f"Erreur envoi parole: {e}", "ERROR")
             return False
 
     def receive_response(self, timeout: int = None) -> Optional[MCEEResponse]:
-        """Reçoit la réponse du MCEE."""
+        """Reçoit la réponse du MCEE (nouvelle connexion dédiée)."""
         if timeout is None:
             timeout = self.timeout
 
         response = [None]
-
-        def callback(ch, method, properties, body):
-            try:
-                data = json.loads(body)
-
-                resp = MCEEResponse()
-                resp.emotions = data.get("emotions", {})
-                resp.E_global = data.get("E_global", 0.0)
-                resp.variance_global = data.get("variance_global", 0.0)
-                resp.valence = data.get("valence", 0.0)
-                resp.intensity = data.get("intensity", 0.0)
-                resp.dominant = data.get("dominant", "")
-                resp.dominant_value = data.get("dominant_value", 0.0)
-                resp.phase = data.get("phase", "")
-
-                if "pattern" in data:
-                    p = data["pattern"]
-                    resp.pattern = PatternInfo(
-                        id=p.get("id", ""),
-                        name=p.get("name", ""),
-                        similarity=p.get("similarity", 0.0),
-                        confidence=p.get("confidence", 0.0),
-                        is_new=p.get("is_new", False),
-                        is_transition=p.get("is_transition", False)
-                    )
-
-                if "mct" in data:
-                    m = data["mct"]
-                    resp.mct = MCTState(
-                        size=m.get("size", 0),
-                        stability=m.get("stability", 0.0),
-                        volatility=m.get("volatility", 0.0),
-                        trend=m.get("trend", 0.0)
-                    )
-
-                resp.coefficients = data.get("coefficients", {})
-                resp.timestamp = datetime.now()
-
-                response[0] = resp
-                self.log(f"Réponse reçue: MCT size={resp.mct.size}, pattern={resp.pattern.name}")
-
-            except Exception as e:
-                self.log(f"Erreur parsing réponse: {e}", "ERROR")
-
-            ch.stop_consuming()
+        conn = None
 
         try:
-            self.channel.exchange_declare(
+            conn = self._new_connection()
+            channel = conn.channel()
+
+            channel.exchange_declare(
                 exchange=MCEE_OUTPUT_EXCHANGE,
                 exchange_type="topic",
                 durable=True
             )
 
-            result = self.channel.queue_declare(queue="", exclusive=True)
+            result = channel.queue_declare(queue="", exclusive=True)
             queue_name = result.method.queue
 
-            self.channel.queue_bind(
+            channel.queue_bind(
                 exchange=MCEE_OUTPUT_EXCHANGE,
                 queue=queue_name,
                 routing_key=MCEE_OUTPUT_ROUTING_KEY
             )
 
-            self.channel.basic_consume(
+            def callback(ch, method, properties, body):
+                try:
+                    data = json.loads(body)
+
+                    resp = MCEEResponse()
+                    resp.emotions = data.get("emotions", {})
+                    resp.E_global = data.get("E_global", 0.0)
+                    resp.variance_global = data.get("variance_global", 0.0)
+                    resp.valence = data.get("valence", 0.0)
+                    resp.intensity = data.get("intensity", 0.0)
+                    resp.dominant = data.get("dominant", "")
+                    resp.dominant_value = data.get("dominant_value", 0.0)
+                    resp.phase = data.get("phase", "")
+
+                    if "pattern" in data:
+                        p = data["pattern"]
+                        resp.pattern = PatternInfo(
+                            id=p.get("id", ""),
+                            name=p.get("name", ""),
+                            similarity=p.get("similarity", 0.0),
+                            confidence=p.get("confidence", 0.0),
+                            is_new=p.get("is_new", False),
+                            is_transition=p.get("is_transition", False)
+                        )
+
+                    if "mct" in data:
+                        m = data["mct"]
+                        resp.mct = MCTState(
+                            size=m.get("size", 0),
+                            stability=m.get("stability", 0.0),
+                            volatility=m.get("volatility", 0.0),
+                            trend=m.get("trend", 0.0)
+                        )
+
+                    resp.coefficients = data.get("coefficients", {})
+                    resp.timestamp = datetime.now()
+
+                    response[0] = resp
+                    self.log(f"Réponse reçue: MCT size={resp.mct.size}, pattern={resp.pattern.name}")
+
+                except Exception as e:
+                    self.log(f"Erreur parsing réponse: {e}", "ERROR")
+
+                ch.stop_consuming()
+
+            channel.basic_consume(
                 queue=queue_name,
                 on_message_callback=callback,
                 auto_ack=True
             )
 
-            # Timeout
-            self.connection.call_later(timeout, lambda: self.channel.stop_consuming())
-            self.channel.start_consuming()
-
-            return response[0]
+            # Timeout via timer
+            conn.call_later(timeout, lambda: channel.stop_consuming())
+            channel.start_consuming()
 
         except Exception as e:
             self.log(f"Erreur réception: {e}", "ERROR")
-            return None
+        finally:
+            if conn and conn.is_open:
+                try:
+                    conn.close()
+                except:
+                    pass
+
+        return response[0]
 
     def run_scenario(self, scenario: EmotionalScenario,
                      previous_mct_size: int = 0) -> TestResult:
@@ -490,6 +506,11 @@ class MCTRealisteTester:
         print(f"  Phase attendue: {scenario.expected_phase.value}")
         print(f"{'='*70}")
 
+        # Envoyer le texte si présent (avant les émotions)
+        if scenario.speech_text:
+            self.send_speech(scenario.speech_text)
+            time.sleep(0.3)
+
         # Démarrer le récepteur en arrière-plan
         response = [None]
         receiver_done = threading.Event()
@@ -500,15 +521,12 @@ class MCTRealisteTester:
 
         thread = threading.Thread(target=receive)
         thread.start()
-        time.sleep(0.3)  # Laisser le récepteur se connecter
-
-        # Envoyer le texte si présent
-        if scenario.speech_text:
-            self.send_speech(scenario.speech_text)
-            time.sleep(0.2)
+        time.sleep(0.5)  # Laisser le récepteur se connecter
 
         # Envoyer les émotions
         if not self.send_emotions(scenario.emotions):
+            receiver_done.set()
+            thread.join(timeout=1)
             return TestResult(
                 name=scenario.name,
                 passed=False,
@@ -517,8 +535,8 @@ class MCTRealisteTester:
             )
 
         # Attendre la réponse
-        receiver_done.wait(timeout=self.timeout + 1)
-        thread.join(timeout=1)
+        receiver_done.wait(timeout=self.timeout + 2)
+        thread.join(timeout=2)
 
         duration_ms = (time.time() - start_time) * 1000
 
@@ -626,15 +644,14 @@ class MCTRealisteTester:
         print(f"  Verbose: {self.verbose}")
         print("=" * 70)
 
-        # Connexion
-        if not self.connect():
+        # Vérifier connexion
+        if not self.check_connection():
             return {"error": "Connexion RabbitMQ impossible"}
 
         # Attendre MCEE
         if not self.wait_for_mcee(timeout=15.0):
             print("\n⚠ MCEE non détecté. Lancez-le avec:")
             print("  cd mcee_final/build && ./mcee")
-            self.disconnect()
             return {"error": "MCEE non disponible"}
 
         # Exécuter les scénarios
@@ -687,8 +704,6 @@ class MCTRealisteTester:
 
         print("=" * 70)
 
-        self.disconnect()
-
         return {
             "passed": passed_count,
             "total": len(self.results),
@@ -713,12 +728,11 @@ def main():
 
     if args.quick:
         print("Mode rapide: vérification connexion seulement")
-        if tester.connect():
+        if tester.check_connection():
             if tester.check_mcee_ready():
                 print("✓ MCEE prêt")
             else:
                 print("✗ MCEE non prêt")
-            tester.disconnect()
         return
 
     results = tester.run_all_scenarios()
