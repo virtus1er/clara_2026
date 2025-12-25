@@ -10,6 +10,8 @@ import time
 import sys
 
 RABBITMQ_HOST = 'localhost'
+RABBITMQ_USER = 'virtus'
+RABBITMQ_PASS = 'virtus@83'
 REQUEST_QUEUE = 'neo4j.requests.queue'
 RESPONSE_EXCHANGE = 'neo4j.responses'
 
@@ -23,7 +25,7 @@ def test_neo4j_service():
         # Connexion RabbitMQ
         params = pika.ConnectionParameters(
             host=RABBITMQ_HOST,
-            credentials=pika.PlainCredentials('guest', 'guest'),
+            credentials=pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS),
             connection_attempts=3,
             retry_delay=1
         )
