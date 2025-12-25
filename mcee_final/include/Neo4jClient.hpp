@@ -235,11 +235,18 @@ public:
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * @brief Crée une nouvelle session MCT
+     * @brief Crée une nouvelle session MCT (synchrone)
      * @param pattern Pattern initial
      * @return ID de la session
      */
     std::string createSession(const std::string& pattern = "SERENITE");
+
+    /**
+     * @brief Crée une nouvelle session MCT (asynchrone, non-bloquant)
+     * @param pattern Pattern initial
+     * @param callback Callback appelé quand la session est créée
+     */
+    void createSessionAsync(const std::string& pattern, Neo4jCallback callback);
 
     /**
      * @brief Met à jour une session avec un état émotionnel
