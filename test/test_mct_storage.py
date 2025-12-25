@@ -76,10 +76,10 @@ class MCTStorageTester:
         self.results: List[MCTStorageResult] = []
 
     def log(self, msg: str, level: str = "INFO"):
-        if self.verbose or level in ["ERROR", "SUCCESS"]:
+        if self.verbose or level in ["ERROR", "SUCCESS", "WARNING"]:
             ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             icon = {"INFO": "ℹ", "ERROR": "✗", "SUCCESS": "✓", "WARNING": "⚠"}.get(level, "•")
-            print(f"[{ts}] {icon} {msg}")
+            print(f"  [{ts}] {icon} {msg}")
 
     def _get_params(self):
         return pika.ConnectionParameters(
@@ -103,40 +103,59 @@ class MCTStorageTester:
     def send_and_receive(self, emotions: Dict[str, float], timeout: int = 10) -> Optional[Dict]:
         """Envoie des émotions et reçoit la réponse."""
         response = [None]
+        received_count = [0]
 
         try:
             # Connexion pour recevoir
+            self.log("Connexion receive...", "INFO")
             recv_conn = pika.BlockingConnection(self._get_params())
             recv_ch = recv_conn.channel()
             recv_ch.exchange_declare(exchange=MCEE_OUTPUT_EXCHANGE, exchange_type="topic", durable=True)
             result = recv_ch.queue_declare(queue="", exclusive=True)
             queue_name = result.method.queue
             recv_ch.queue_bind(exchange=MCEE_OUTPUT_EXCHANGE, queue=queue_name, routing_key=MCEE_OUTPUT_ROUTING_KEY)
+            self.log(f"Queue temporaire: {queue_name} -> {MCEE_OUTPUT_EXCHANGE}/{MCEE_OUTPUT_ROUTING_KEY}", "INFO")
 
             def callback(ch, method, props, body):
-                response[0] = json.loads(body)
+                received_count[0] += 1
+                self.log(f"Message reçu #{received_count[0]}: {len(body)} bytes", "SUCCESS")
+                try:
+                    response[0] = json.loads(body)
+                except Exception as e:
+                    self.log(f"Erreur parsing JSON: {e}", "ERROR")
                 ch.stop_consuming()
 
             recv_ch.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
             recv_conn.call_later(timeout, lambda: recv_ch.stop_consuming())
 
             # Envoyer les émotions
+            self.log("Connexion send...", "INFO")
             send_conn = pika.BlockingConnection(self._get_params())
             send_ch = send_conn.channel()
             send_ch.exchange_declare(exchange=MCEE_INPUT_EXCHANGE, exchange_type="topic", durable=True)
+
+            msg_body = json.dumps(emotions)
             send_ch.basic_publish(
                 exchange=MCEE_INPUT_EXCHANGE,
                 routing_key=MCEE_INPUT_ROUTING_KEY,
-                body=json.dumps(emotions)
+                body=msg_body
             )
+            self.log(f"Envoyé {len(msg_body)} bytes -> {MCEE_INPUT_EXCHANGE}/{MCEE_INPUT_ROUTING_KEY}", "SUCCESS")
             send_conn.close()
 
             # Recevoir
+            self.log(f"Attente réponse (timeout={timeout}s)...", "INFO")
             recv_ch.start_consuming()
+
+            if response[0] is None:
+                self.log(f"Timeout - aucune réponse reçue après {timeout}s", "WARNING")
+
             recv_conn.close()
 
         except Exception as e:
             self.log(f"Erreur: {e}", "ERROR")
+            import traceback
+            traceback.print_exc()
 
         return response[0]
 
