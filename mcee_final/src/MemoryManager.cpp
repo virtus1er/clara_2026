@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 
@@ -28,10 +29,25 @@ bool MemoryManager::setNeo4jConfig(const Neo4jClientConfig& config) {
     if (neo4j_client_->connect()) {
         neo4j_enabled_ = true;
 
-        // Créer une session dans Neo4j
-        neo4j_session_id_ = neo4j_client_->createSession("SERENITE");
+        // Créer une session dans Neo4j de manière asynchrone
+        // pour ne pas bloquer le démarrage du MCEE
+        std::cout << "[MemoryManager] Neo4j connecté, création de session asynchrone...\n";
 
-        std::cout << "[MemoryManager] Neo4j connecté (session=" << neo4j_session_id_ << ")\n";
+        // Utiliser un callback pour créer la session sans bloquer
+        neo4j_client_->sendRequest("create_session",
+            {{"pattern", "SERENITE"}},
+            [this](const Neo4jResponse& response) {
+                if (response.success && response.data.contains("id")) {
+                    neo4j_session_id_ = response.data["id"].get<std::string>();
+                    std::cout << "[MemoryManager] Session Neo4j créée: " << neo4j_session_id_ << "\n";
+                } else {
+                    std::cerr << "[MemoryManager] Échec création session Neo4j: " << response.error << "\n";
+                    // Générer un ID local en cas d'échec
+                    neo4j_session_id_ = "LOCAL_SESSION_" + std::to_string(
+                        std::chrono::system_clock::now().time_since_epoch().count());
+                }
+            });
+
         return true;
     }
 
