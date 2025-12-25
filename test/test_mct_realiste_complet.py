@@ -205,25 +205,60 @@ class RealisticMCTTester:
         self.log(f"Étape: {step.name}", "SCENARIO")
         self.log(f"  {step.description}", "INFO")
 
-        # Envoyer la parole d'abord (contexte)
-        if step.speech:
-            self.send_speech(step.speech)
-            time.sleep(0.3)  # Laisser le temps au MCEE de traiter
+        response = [None]
 
-        # Envoyer les émotions
-        if not self.send_emotions(step.emotions):
+        try:
+            # 1. D'ABORD s'abonner pour recevoir la réponse
+            recv_conn = pika.BlockingConnection(self._get_params())
+            recv_ch = recv_conn.channel()
+            recv_ch.exchange_declare(
+                exchange=MCEE_OUTPUT_EXCHANGE,
+                exchange_type="topic",
+                durable=True
+            )
+            result = recv_ch.queue_declare(queue="", exclusive=True)
+            queue_name = result.method.queue
+            recv_ch.queue_bind(
+                exchange=MCEE_OUTPUT_EXCHANGE,
+                queue=queue_name,
+                routing_key=MCEE_OUTPUT_ROUTING_KEY
+            )
+
+            def callback(ch, method, props, body):
+                response[0] = json.loads(body)
+                ch.stop_consuming()
+
+            recv_ch.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
+            recv_conn.call_later(8, lambda: recv_ch.stop_consuming())
+
+            # 2. Envoyer la parole (contexte)
+            if step.speech:
+                self.send_speech(step.speech)
+
+            # 3. Envoyer les émotions
+            if not self.send_emotions(step.emotions):
+                recv_conn.close()
+                return None
+
+            # 4. Attendre la réponse
+            self.log("Attente réponse...", "INFO")
+            recv_ch.start_consuming()
+            recv_conn.close()
+
+        except Exception as e:
+            self.log(f"Erreur: {e}", "ERROR")
+            import traceback
+            traceback.print_exc()
             return None
 
-        # Recevoir la réponse
-        response = self.receive_response(timeout=5)
-        if not response:
+        if not response[0]:
             self.log("Pas de réponse du MCEE", "WARNING")
             return None
 
         # Parser la réponse
-        mct = response.get("mct", {})
-        pattern = response.get("pattern", {})
-        graph = response.get("mct_graph", {})
+        mct = response[0].get("mct", {})
+        pattern = response[0].get("pattern", {})
+        graph = response[0].get("mct_graph", {})
 
         state = MCTState(
             step_name=step.name,
@@ -233,14 +268,14 @@ class RealisticMCTTester:
             trend=mct.get("trend", 0.0),
             pattern=pattern.get("name", "?"),
             pattern_similarity=pattern.get("similarity", 0.0),
-            dominant=response.get("dominant", "?"),
-            dominant_value=response.get("dominant_value", 0.0),
-            intensity=response.get("intensity", 0.0),
-            e_global=response.get("E_global", 0.0),
+            dominant=response[0].get("dominant", "?"),
+            dominant_value=response[0].get("dominant_value", 0.0),
+            intensity=response[0].get("intensity", 0.0),
+            e_global=response[0].get("E_global", 0.0),
             mctgraph_emotions=graph.get("emotion_count", 0),
             mctgraph_words=graph.get("word_count", 0),
-            emergency_triggered="emergency" in response,
-            raw=response
+            emergency_triggered="emergency" in response[0],
+            raw=response[0]
         )
 
         self.states.append(state)
