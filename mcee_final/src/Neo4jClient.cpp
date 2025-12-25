@@ -516,6 +516,11 @@ std::string Neo4jClient::createSession(const std::string& pattern) {
     return "";
 }
 
+void Neo4jClient::createSessionAsync(const std::string& pattern, Neo4jCallback callback) {
+    json payload = {{"pattern", pattern}};
+    sendRequest("create_session", payload, callback);
+}
+
 void Neo4jClient::updateSession(
     const std::string& session_id,
     const EmotionalState& state,

@@ -33,9 +33,8 @@ bool MemoryManager::setNeo4jConfig(const Neo4jClientConfig& config) {
         // pour ne pas bloquer le démarrage du MCEE
         std::cout << "[MemoryManager] Neo4j connecté, création de session asynchrone...\n";
 
-        // Utiliser un callback pour créer la session sans bloquer
-        neo4j_client_->sendRequest("create_session",
-            {{"pattern", "SERENITE"}},
+        // Utiliser createSessionAsync pour créer la session sans bloquer
+        neo4j_client_->createSessionAsync("SERENITE",
             [this](const Neo4jResponse& response) {
                 if (response.success && response.data.contains("id")) {
                     neo4j_session_id_ = response.data["id"].get<std::string>();
