@@ -199,11 +199,32 @@ void Neo4jClient::responseConsumerLoop() {
                 json response_json = json::parse(body);
 
                 Neo4jResponse response;
-                response.request_id = response_json.value("request_id", "");
-                response.success = response_json.value("success", false);
-                response.data = response_json.value("data", json{});
-                response.error = response_json.value("error", "");
-                response.execution_time_ms = response_json.value("execution_time_ms", 0.0);
+                // Gérer les valeurs null en vérifiant is_null() avant extraction
+                auto get_string = [&](const std::string& key, const std::string& def) -> std::string {
+                    if (response_json.contains(key) && !response_json[key].is_null()) {
+                        return response_json[key].get<std::string>();
+                    }
+                    return def;
+                };
+                auto get_bool = [&](const std::string& key, bool def) -> bool {
+                    if (response_json.contains(key) && !response_json[key].is_null()) {
+                        return response_json[key].get<bool>();
+                    }
+                    return def;
+                };
+                auto get_double = [&](const std::string& key, double def) -> double {
+                    if (response_json.contains(key) && !response_json[key].is_null()) {
+                        return response_json[key].get<double>();
+                    }
+                    return def;
+                };
+
+                response.request_id = get_string("request_id", "");
+                response.success = get_bool("success", false);
+                response.data = response_json.contains("data") && !response_json["data"].is_null()
+                                ? response_json["data"] : json{};
+                response.error = get_string("error", "");
+                response.execution_time_ms = get_double("execution_time_ms", 0.0);
 
                 // Vérifier si un callback attend cette réponse
                 {
