@@ -635,17 +635,16 @@ EmotionalState MCT::sanitize(const EmotionalState& state) const {
     }
 
     // Limiter les sauts extrêmes si on a un état précédent
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!buffer_.empty()) {
-            const auto& prev_state = buffer_.back().state;
-            for (size_t i = 0; i < 24; ++i) {
-                double diff = safe.emotions[i] - prev_state.emotions[i];
-                if (std::abs(diff) > config_.max_jump_threshold) {
-                    // Limiter le saut au max autorisé
-                    double sign = (diff > 0) ? 1.0 : -1.0;
-                    safe.emotions[i] = prev_state.emotions[i] + sign * config_.max_jump_threshold;
-                }
+    // NOTE: Cette méthode est appelée depuis push() qui détient déjà mutex_
+    // donc on accède directement à buffer_ sans lock supplémentaire
+    if (!buffer_.empty()) {
+        const auto& prev_state = buffer_.back().state;
+        for (size_t i = 0; i < 24; ++i) {
+            double diff = safe.emotions[i] - prev_state.emotions[i];
+            if (std::abs(diff) > config_.max_jump_threshold) {
+                // Limiter le saut au max autorisé
+                double sign = (diff > 0) ? 1.0 : -1.0;
+                safe.emotions[i] = prev_state.emotions[i] + sign * config_.max_jump_threshold;
             }
         }
     }
