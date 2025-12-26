@@ -181,12 +181,53 @@ void MCEEEngine::initMemorySystem() {
         std::cout << "[Decision] ⛔ Veto: " << option.name << " (" << reason << ")\n";
     });
 
+    // Créer le HybridSearchEngine (recherche mémoire hybride)
+    // Note: On utilise un shared_ptr avec deleter vide car MemoryManager gère la durée de vie
+    HybridSearchConfig hs_config;
+    hs_config.enable_sentiment_modulation = true;
+    hs_config.default_mode = SearchMode::ADAPTIVE;
+    hs_config.verbose = false;
+
+    std::shared_ptr<Neo4jClient> neo4j_shared(
+        memory_manager_.getNeo4jClient(),
+        [](Neo4jClient*) {}  // Deleter vide: MemoryManager gère la durée de vie
+    );
+
+    hybrid_search_ = std::make_shared<HybridSearchEngine>(
+        neo4j_shared,
+        conscience_engine_,
+        hs_config
+    );
+
+    // Créer le LLMClient (reformulation émotionnelle)
+    LLMClientConfig llm_config;
+    llm_config.mode = LLMMode::DIRECT_HTTP;  // Mode HTTP direct par défaut
+    llm_config.model = "gpt-4o-mini";
+    llm_config.temperature = 0.7;
+    llm_config.max_tokens = 500;
+    llm_config.verbose = false;
+    llm_config.loadFromEnvironment();  // Charge OPENAI_API_KEY
+
+    llm_client_ = std::make_shared<LLMClient>(llm_config);
+
+    // Initialiser le LLMClient si la clé API est disponible
+    if (!llm_config.api_key.empty()) {
+        if (llm_client_->initialize()) {
+            std::cout << "[MCEEEngine] LLMClient initialisé (modèle=" << llm_config.model << ")\n";
+        } else {
+            std::cout << "[MCEEEngine] ⚠ LLMClient: échec initialisation\n";
+        }
+    } else {
+        std::cout << "[MCEEEngine] LLMClient: OPENAI_API_KEY non défini (mode désactivé)\n";
+    }
+
     std::cout << "[MCEEEngine] Système MCT/MLT initialisé\n";
     std::cout << "[MCEEEngine] MCTGraph: fenêtre=" << graph_config.time_window_seconds << "s\n";
     std::cout << "[MCEEEngine] MLT: " << mlt_->patternCount() << " patterns de base\n";
     std::cout << "[MCEEEngine] ConscienceEngine initialisé (Wt=" << conscience_engine_->getWisdom() << ")\n";
     std::cout << "[MCEEEngine] ADDOEngine initialisé (Rs=" << addo_engine_->getResilience() << ")\n";
     std::cout << "[MCEEEngine] DecisionEngine initialisé (τ_max=" << decision_config.tau_max_ms << "ms)\n";
+    std::cout << "[MCEEEngine] HybridSearchEngine initialisé\n";
 }
 
 void MCEEEngine::setupCallbacks() {
@@ -1299,6 +1340,156 @@ DecisionResult MCEEEngine::makeDecision(
         context_type,
         available_actions
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GÉNÉRATION DE RÉPONSE ÉMOTIONNELLE (LLM)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::string MCEEEngine::generateEmotionalResponse(
+    const std::string& question,
+    const std::vector<std::string>& lemmas,
+    const std::vector<double>& embedding)
+{
+    // Vérifier que le LLMClient est prêt
+    if (!llm_client_ || !llm_client_->isReady()) {
+        std::cerr << "[MCEEEngine] LLMClient non disponible. "
+                  << "Définissez OPENAI_API_KEY pour activer.\n";
+        return "";
+    }
+
+    // Construire le contexte émotionnel
+    LLMContext context;
+
+    // 1. Recherche hybride dans la mémoire (si disponible)
+    if (hybrid_search_ && !lemmas.empty()) {
+        std::vector<ParsedToken> tokens;
+        for (const auto& lemma : lemmas) {
+            ParsedToken t;
+            t.lemma = lemma;
+            t.text = lemma;
+            t.pos = "NOUN";
+            t.is_significant = true;
+            tokens.push_back(t);
+        }
+
+        auto search_result = hybrid_search_->search(question, tokens, embedding);
+        context = search_result.context;
+
+        std::cout << "[MCEEEngine] Recherche mémoire: "
+                  << search_result.results.size() << " résultats, "
+                  << "confiance=" << std::fixed << std::setprecision(2)
+                  << search_result.overall_confidence << "\n";
+    } else {
+        // Fallback: construire un contexte basique depuis l'état actuel
+        if (conscience_engine_) {
+            auto state = conscience_engine_->getCurrentState();
+            context.Ft = state.sentiment;
+            context.Ct = state.consciousness_level;
+            context.sentiment_label = state.sentiment > 0.2 ? "positif" :
+                                      (state.sentiment < -0.2 ? "négatif" : "neutre");
+        }
+
+        // Ajouter les émotions dominantes
+        context = LLMContext::fromEmotionalState(
+            current_state_,
+            context.Ft,
+            context.Ct
+        );
+    }
+
+    // 2. Générer la réponse via LLM
+    LLMRequest request;
+    request.user_question = question;
+    request.emotional_context = context;
+
+    auto response = llm_client_->generate(request);
+
+    if (response.success) {
+        std::cout << "[MCEEEngine] Réponse LLM générée: "
+                  << response.tokens_total << " tokens, "
+                  << response.generation_time_ms << "ms\n";
+        return response.content;
+    } else {
+        std::cerr << "[MCEEEngine] Erreur LLM: " << response.error_message << "\n";
+        return "";
+    }
+}
+
+void MCEEEngine::generateEmotionalResponseAsync(
+    const std::string& question,
+    const std::vector<std::string>& lemmas,
+    const std::vector<double>& embedding,
+    std::function<void(const PipelineResult&)> callback)
+{
+    // Vérifier que le LLMClient est prêt
+    if (!llm_client_ || !llm_client_->isReady()) {
+        PipelineResult result;
+        result.success = false;
+        result.error = "LLMClient non disponible";
+        if (callback) callback(result);
+        return;
+    }
+
+    // Lancer dans un thread séparé
+    std::thread([this, question, lemmas, embedding, callback]() {
+        PipelineResult result;
+        auto start_time = std::chrono::steady_clock::now();
+
+        // Recherche mémoire
+        LLMContext context;
+        if (hybrid_search_ && !lemmas.empty()) {
+            std::vector<ParsedToken> tokens;
+            for (const auto& lemma : lemmas) {
+                ParsedToken t;
+                t.lemma = lemma;
+                t.text = lemma;
+                t.is_significant = true;
+                tokens.push_back(t);
+            }
+
+            auto search_start = std::chrono::steady_clock::now();
+            auto search_result = hybrid_search_->search(question, tokens, embedding);
+            auto search_end = std::chrono::steady_clock::now();
+
+            result.search_time_ms = std::chrono::duration<double, std::milli>(
+                search_end - search_start).count();
+            context = search_result.context;
+        } else {
+            // Contexte basique
+            if (conscience_engine_) {
+                auto state = conscience_engine_->getCurrentState();
+                context = LLMContext::fromEmotionalState(current_state_, state.sentiment, state.consciousness_level);
+            }
+        }
+
+        result.context = context;
+
+        // Génération LLM
+        auto llm_start = std::chrono::steady_clock::now();
+
+        LLMRequest request;
+        request.user_question = question;
+        request.emotional_context = context;
+
+        auto response = llm_client_->generate(request);
+
+        auto llm_end = std::chrono::steady_clock::now();
+        result.llm_time_ms = std::chrono::duration<double, std::milli>(llm_end - llm_start).count();
+
+        result.success = response.success;
+        result.response = response.content;
+        if (!response.success) {
+            result.error = response.error_message;
+        }
+
+        auto end_time = std::chrono::steady_clock::now();
+        result.total_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        if (callback) {
+            callback(result);
+        }
+    }).detach();
 }
 
 } // namespace mcee
