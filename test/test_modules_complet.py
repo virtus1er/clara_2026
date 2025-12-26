@@ -47,6 +47,11 @@ class MCEEModuleTester:
         """Établit la connexion RabbitMQ"""
         self.connection = pika.BlockingConnection(self.params)
         self.channel = self.connection.channel()
+
+        # Déclarer les exchanges d'entrée pour pouvoir y publier
+        self.channel.exchange_declare(exchange=EMOTIONS_EXCHANGE, exchange_type='topic', durable=True)
+        self.channel.exchange_declare(exchange=SPEECH_EXCHANGE, exchange_type='topic', durable=True)
+
         return True
 
     def close(self):
