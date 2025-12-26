@@ -73,24 +73,34 @@ bool MCT::push(const EmotionalState& state) {
     return true;
 }
 
-void MCT::pushWithSpeech(const EmotionalState& state, 
-                          double sentiment, 
+void MCT::pushWithSpeech(const EmotionalState& state,
+                          double sentiment,
                           double arousal,
                           const std::string& context) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    TimestampedState ts(state);
+
+    // Sanitize l'état si la validation est active (comme dans push())
+    EmotionalState safe_state = config_.enable_input_validation ? sanitize(state) : state;
+
+    TimestampedState ts(safe_state);
     ts.speech_sentiment = sentiment;
     ts.speech_arousal = arousal;
     ts.context = context;
-    
+
     buffer_.push_back(ts);
-    
+
     while (buffer_.size() > config_.max_size) {
         buffer_.pop_front();
     }
-    
+
     invalidateCache();
+
+    // Callbacks (comme dans push())
+    if (stability_callback_ && buffer_.size() >= 2) {
+        auto stability = getStability();
+        auto volatility = getVolatility();
+        stability_callback_(stability, volatility);
+    }
 }
 
 void MCT::clear() {
@@ -647,6 +657,24 @@ EmotionalState MCT::sanitize(const EmotionalState& state) const {
                 safe.emotions[i] = prev_state.emotions[i] + sign * config_.max_jump_threshold;
             }
         }
+    }
+
+    // Garantir qu'au moins une émotion est non-nulle (éviter ALL_ZERO)
+    size_t nonzero_count = 0;
+    size_t max_idx = 0;
+    double max_val = safe.emotions[0];
+    for (size_t i = 0; i < 24; ++i) {
+        if (safe.emotions[i] > 0.001) {
+            nonzero_count++;
+        }
+        if (safe.emotions[i] > max_val) {
+            max_val = safe.emotions[i];
+            max_idx = i;
+        }
+    }
+    if (nonzero_count < static_cast<size_t>(config_.min_nonzero_emotions)) {
+        // Préserver l'émotion dominante à un niveau minimal
+        safe.emotions[max_idx] = std::max(safe.emotions[max_idx], 0.01);
     }
 
     // Recalculer E_global
