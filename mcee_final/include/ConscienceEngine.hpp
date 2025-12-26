@@ -103,9 +103,20 @@ public:
     void addExperience(double amount);
 
     /**
+     * Applique la décroissance de la sagesse pour éviter la rigidité
+     * Doit être appelé périodiquement (ex: chaque cycle)
+     */
+    void applyWisdomDecay();
+
+    /**
      * Récupère le niveau de sagesse actuel
      */
     [[nodiscard]] double getWisdom() const;
+
+    /**
+     * Récupère l'expérience accumulée
+     */
+    [[nodiscard]] double getExperience() const;
 
     // ═══════════════════════════════════════════════════════════
     // ACCÈS À L'ÉTAT

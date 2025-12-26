@@ -175,11 +175,37 @@ void ConscienceEngine::addExperience(double amount) {
     // Wt = wisdom_base + wisdom_growth_rate * log(1 + experience)
     wisdom_ = config_.wisdom_base +
               config_.wisdom_growth_rate * std::log1p(experience_);
+
+    // Appliquer le plafond
+    wisdom_ = std::min(wisdom_, config_.wisdom_max);
+}
+
+void ConscienceEngine::applyWisdomDecay() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Décroissance lente de l'expérience pour éviter accumulation infinie
+    experience_ *= config_.experience_decay_rate;
+
+    // Décroissance lente de la sagesse vers le plancher
+    if (wisdom_ > config_.wisdom_floor) {
+        wisdom_ *= config_.wisdom_decay_rate;
+        wisdom_ = std::max(wisdom_, config_.wisdom_floor);
+    }
+
+    // Recalculer en fonction de l'expérience décroissante
+    double calculated = config_.wisdom_base +
+                       config_.wisdom_growth_rate * std::log1p(experience_);
+    wisdom_ = std::min(wisdom_, std::min(calculated, config_.wisdom_max));
 }
 
 double ConscienceEngine::getWisdom() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return wisdom_;
+}
+
+double ConscienceEngine::getExperience() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return experience_;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
