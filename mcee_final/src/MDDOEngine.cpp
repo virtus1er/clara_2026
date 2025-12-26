@@ -160,7 +160,7 @@ SituationFrame MDDOEngine::perceive(const SituationFrame& raw_situation) {
     }
 
     // Biais de confirmation (si pattern dominant très stable)
-    if (raw_situation.emotional_state.variance < 0.1) {
+    if (raw_situation.emotional_state.variance_global < 0.1) {
         enriched.active_biases.push_back("CONFIRMATION_BIAS");
     }
 
