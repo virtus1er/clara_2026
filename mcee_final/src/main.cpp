@@ -35,7 +35,119 @@ void printUsage(const char* program) {
               << "  --user <user>         Utilisateur RabbitMQ (défaut: virtus)\n"
               << "  --pass <password>     Mot de passe RabbitMQ\n"
               << "  --demo                Mode démonstration (sans RabbitMQ)\n"
+              << "  --llm-test            Mode test LLM interactif\n"
               << "\n";
+}
+
+void runLLMTest(MCEEEngine& engine) {
+    std::cout << "\n";
+    std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║              MODE TEST LLM - Reformulation Émotionnelle       ║\n";
+    std::cout << "╚══════════════════════════════════════════════════════════════╝\n\n";
+
+    // Vérifier que le LLM est prêt
+    if (!engine.isLLMReady()) {
+        std::cerr << "[LLM Test] ERREUR: LLMClient non disponible.\n";
+        std::cerr << "           Vérifiez que OPENAI_API_KEY est défini.\n";
+        return;
+    }
+
+    std::cout << "[LLM Test] LLMClient prêt. Tapez vos questions (ou 'quit' pour sortir).\n";
+    std::cout << "[LLM Test] Conseil: Tapez d'abord une phrase émotionnelle pour enrichir le contexte.\n\n";
+
+    // Simuler un état émotionnel initial (neutre/calme)
+    std::unordered_map<std::string, double> initial_state;
+    for (const auto& name : EMOTION_NAMES) {
+        initial_state[name] = 0.1;
+    }
+    initial_state["Calme"] = 0.5;
+    initial_state["Intérêt"] = 0.4;
+    engine.processEmotions(initial_state);
+
+    std::string input;
+    while (g_running.load()) {
+        std::cout << "\n> ";
+        std::getline(std::cin, input);
+
+        if (input.empty()) continue;
+        if (input == "quit" || input == "exit" || input == "q") {
+            std::cout << "[LLM Test] Au revoir!\n";
+            break;
+        }
+
+        // Commandes spéciales
+        if (input == "/state") {
+            auto conscience_state = engine.getConscienceState();
+            std::cout << "[État] Ft=" << std::fixed << std::setprecision(2)
+                      << conscience_state.sentiment
+                      << " Ct=" << conscience_state.consciousness_level
+                      << " (" << conscience_state.dominant_state << ")\n";
+            continue;
+        }
+
+        if (input == "/joy") {
+            std::unordered_map<std::string, double> joy_state;
+            for (const auto& name : EMOTION_NAMES) joy_state[name] = 0.1;
+            joy_state["Joie"] = 0.8;
+            joy_state["Excitation"] = 0.6;
+            engine.processEmotions(joy_state);
+            std::cout << "[État] Passage en mode JOIE\n";
+            continue;
+        }
+
+        if (input == "/sad") {
+            std::unordered_map<std::string, double> sad_state;
+            for (const auto& name : EMOTION_NAMES) sad_state[name] = 0.1;
+            sad_state["Tristesse"] = 0.7;
+            sad_state["Nostalgie"] = 0.5;
+            engine.processEmotions(sad_state);
+            std::cout << "[État] Passage en mode TRISTESSE\n";
+            continue;
+        }
+
+        if (input == "/calm") {
+            std::unordered_map<std::string, double> calm_state;
+            for (const auto& name : EMOTION_NAMES) calm_state[name] = 0.1;
+            calm_state["Calme"] = 0.7;
+            calm_state["Soulagement"] = 0.4;
+            engine.processEmotions(calm_state);
+            std::cout << "[État] Passage en mode CALME\n";
+            continue;
+        }
+
+        if (input == "/help") {
+            std::cout << "Commandes disponibles:\n";
+            std::cout << "  /state  - Affiche l'état émotionnel actuel\n";
+            std::cout << "  /joy    - Passe en état de joie\n";
+            std::cout << "  /sad    - Passe en état de tristesse\n";
+            std::cout << "  /calm   - Passe en état calme\n";
+            std::cout << "  /help   - Affiche cette aide\n";
+            std::cout << "  quit    - Quitte le mode test\n";
+            continue;
+        }
+
+        // Traiter le texte pour enrichir le contexte émotionnel
+        engine.processSpeechText(input, "user");
+
+        // Générer la réponse LLM
+        std::cout << "\n[Génération en cours...]\n";
+
+        auto start_time = std::chrono::steady_clock::now();
+        std::string response = engine.generateEmotionalResponse(input);
+        auto end_time = std::chrono::steady_clock::now();
+
+        double elapsed_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+        if (!response.empty()) {
+            std::cout << "\n┌─────────────────────────────────────────────────────────────┐\n";
+            std::cout << "│ Réponse (" << std::fixed << std::setprecision(0) << elapsed_ms << "ms):\n";
+            std::cout << "├─────────────────────────────────────────────────────────────┘\n";
+            std::cout << response << "\n";
+            std::cout << "└─────────────────────────────────────────────────────────────\n";
+        } else {
+            std::cout << "[LLM Test] Erreur: pas de réponse générée.\n";
+        }
+    }
 }
 
 void runDemo(MCEEEngine& engine) {
@@ -142,11 +254,12 @@ int main(int argc, char* argv[]) {
     RabbitMQConfig config;
     std::string config_file = "phase_config.json";
     bool demo_mode = false;
+    bool llm_test_mode = false;
 
     // Parser les arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
+
         if (arg == "-h" || arg == "--help") {
             printUsage(argv[0]);
             return 0;
@@ -172,6 +285,8 @@ int main(int argc, char* argv[]) {
             }
         } else if (arg == "--demo") {
             demo_mode = true;
+        } else if (arg == "--llm-test") {
+            llm_test_mode = true;
         }
     }
 
@@ -200,6 +315,9 @@ int main(int argc, char* argv[]) {
         if (demo_mode) {
             // Mode démonstration
             runDemo(engine);
+        } else if (llm_test_mode) {
+            // Mode test LLM interactif
+            runLLMTest(engine);
         } else {
             // Mode normal avec RabbitMQ
             // IMPORTANT: Démarrer le consumer RabbitMQ EN PREMIER
