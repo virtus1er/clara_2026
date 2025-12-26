@@ -477,15 +477,21 @@ void MCEEEngine::speechConsumeLoop() {
 void MCEEEngine::handleEmotionMessage(const std::string& body) {
     try {
         json input = json::parse(body);
-        
+
+        std::cout << "[MCEEEngine] Message émotion reçu (" << body.size() << " bytes)\n";
+
         std::unordered_map<std::string, double> raw_emotions;
+        size_t found_count = 0;
         for (const auto& name : EMOTION_NAMES) {
             if (input.contains(name)) {
                 raw_emotions[name] = input[name].get<double>();
+                found_count++;
             } else {
                 raw_emotions[name] = 0.0;
             }
         }
+
+        std::cout << "[MCEEEngine] Émotions trouvées: " << found_count << "/24\n";
 
         processEmotions(raw_emotions);
 
