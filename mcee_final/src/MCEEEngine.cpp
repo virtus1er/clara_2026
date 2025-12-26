@@ -536,16 +536,22 @@ void MCEEEngine::handleSpeechMessage(const std::string& body) {
 }
 
 void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& raw_emotions) {
+    std::cout << "[MCEEEngine] processEmotions() appelé\n" << std::flush;
+
     std::lock_guard<std::mutex> lock(state_mutex_);
-    
+
     // Sauvegarder l'état précédent
     previous_state_ = current_state_;
 
     // Convertir en EmotionalState
     current_state_ = rawToState(raw_emotions);
 
+    std::cout << "[MCEEEngine] État converti, E_global=" << current_state_.E_global << "\n" << std::flush;
+
     // Exécuter le pipeline complet
     processPipeline(raw_emotions);
+
+    std::cout << "[MCEEEngine] Pipeline terminé\n" << std::flush;
 }
 
 void MCEEEngine::processSpeechText(const std::string& text, const std::string& source) {
