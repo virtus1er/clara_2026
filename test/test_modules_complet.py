@@ -62,9 +62,9 @@ class MCEEModuleTester:
                 conn = pika.BlockingConnection(self.params)
                 ch = conn.channel()
 
-                # Déclarer les exchanges
+                # Déclarer les exchanges (topic pour les deux)
                 ch.exchange_declare(exchange=OUTPUT_EXCHANGE, exchange_type='topic', durable=True)
-                ch.exchange_declare(exchange=SNAPSHOT_EXCHANGE, exchange_type='fanout', durable=True)
+                ch.exchange_declare(exchange=SNAPSHOT_EXCHANGE, exchange_type='topic', durable=True)
 
                 # Queue temporaire pour les sorties
                 result = ch.queue_declare(queue='', exclusive=True)
@@ -74,7 +74,7 @@ class MCEEModuleTester:
                 # Queue temporaire pour les snapshots
                 result2 = ch.queue_declare(queue='', exclusive=True)
                 snapshot_queue = result2.method.queue
-                ch.queue_bind(exchange=SNAPSHOT_EXCHANGE, queue=snapshot_queue)
+                ch.queue_bind(exchange=SNAPSHOT_EXCHANGE, queue=snapshot_queue, routing_key='mct.#')
 
                 def on_output(ch, method, props, body):
                     try:
@@ -84,8 +84,9 @@ class MCEEModuleTester:
                             'routing_key': method.routing_key,
                             'data': data
                         })
-                    except:
-                        pass
+                        print(f"    📥 Output reçu: {method.routing_key}")
+                    except Exception as e:
+                        print(f"    ⚠️ Erreur parsing output: {e}")
 
                 def on_snapshot(ch, method, props, body):
                     try:
@@ -94,8 +95,9 @@ class MCEEModuleTester:
                             'timestamp': datetime.now().isoformat(),
                             'data': data
                         })
-                    except:
-                        pass
+                        print(f"    📥 Snapshot reçu")
+                    except Exception as e:
+                        print(f"    ⚠️ Erreur parsing snapshot: {e}")
 
                 ch.basic_consume(queue=output_queue, on_message_callback=on_output, auto_ack=True)
                 ch.basic_consume(queue=snapshot_queue, on_message_callback=on_snapshot, auto_ack=True)
@@ -110,7 +112,7 @@ class MCEEModuleTester:
 
         thread = threading.Thread(target=consumer_thread, daemon=True)
         thread.start()
-        time.sleep(0.5)  # Attendre que le consumer démarre
+        time.sleep(1.0)  # Attendre que le consumer démarre
 
     def send_emotions(self, emotions: list, name: str = "test"):
         """Envoie un vecteur de 24 émotions au MCEE"""
