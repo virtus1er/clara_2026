@@ -199,6 +199,13 @@ int main() {
         // Déclarer l'échange pour envoyer les prédictions
         channel->DeclareExchange(output_exchange, AmqpClient::Channel::EXCHANGE_TYPE_TOPIC, false, true, false);
 
+        // Déclarer aussi la queue MCEE côté producteur (idempotent)
+        // Évite la perte de messages si MCEE n'est pas encore démarré
+        const std::string mcee_queue = "mcee_emotions_queue";
+        channel->DeclareQueue(mcee_queue, false, true, false, false);  // durable=true
+        channel->BindQueue(mcee_queue, output_exchange, routing_key);
+        std::cout << "[Emotion] Queue MCEE créée/vérifiée: " << mcee_queue << "\n";
+
         // Liste des émotions dans l'ordre
         std::vector<std::string> ordered_emo = {
             "Admiration", "Adoration", "Appréciation esthétique", "Amusement", "Anxiété",
