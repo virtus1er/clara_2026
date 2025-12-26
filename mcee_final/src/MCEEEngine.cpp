@@ -477,15 +477,21 @@ void MCEEEngine::speechConsumeLoop() {
 void MCEEEngine::handleEmotionMessage(const std::string& body) {
     try {
         json input = json::parse(body);
-        
+
+        std::cout << "[MCEEEngine] Message émotion reçu (" << body.size() << " bytes)\n";
+
         std::unordered_map<std::string, double> raw_emotions;
+        size_t found_count = 0;
         for (const auto& name : EMOTION_NAMES) {
             if (input.contains(name)) {
                 raw_emotions[name] = input[name].get<double>();
+                found_count++;
             } else {
                 raw_emotions[name] = 0.0;
             }
         }
+
+        std::cout << "[MCEEEngine] Émotions trouvées: " << found_count << "/24\n";
 
         processEmotions(raw_emotions);
 
@@ -530,16 +536,22 @@ void MCEEEngine::handleSpeechMessage(const std::string& body) {
 }
 
 void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& raw_emotions) {
+    std::cout << "[MCEEEngine] processEmotions() appelé\n" << std::flush;
+
     std::lock_guard<std::mutex> lock(state_mutex_);
-    
+
     // Sauvegarder l'état précédent
     previous_state_ = current_state_;
 
     // Convertir en EmotionalState
     current_state_ = rawToState(raw_emotions);
 
+    std::cout << "[MCEEEngine] État converti, E_global=" << current_state_.E_global << "\n" << std::flush;
+
     // Exécuter le pipeline complet
     processPipeline(raw_emotions);
+
+    std::cout << "[MCEEEngine] Pipeline terminé\n" << std::flush;
 }
 
 void MCEEEngine::processSpeechText(const std::string& text, const std::string& source) {
