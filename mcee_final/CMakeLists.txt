@@ -42,7 +42,7 @@ link_directories(/usr/local/lib)
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
 
-# Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph + Conscience + ADDO + Decision
+# Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph + Conscience + ADDO + Decision + MDDO
 set(MCEE_SOURCES
     src/main.cpp
     src/MCEEEngine.cpp
@@ -59,6 +59,7 @@ set(MCEE_SOURCES
     src/ConscienceEngine.cpp
     src/ADDOEngine.cpp
     src/DecisionEngine.cpp
+    src/MDDOEngine.cpp
 )
 
 set(MCEE_HEADERS
@@ -81,6 +82,7 @@ set(MCEE_HEADERS
     include/ADDOEngine.hpp
     include/DecisionConfig.hpp
     include/DecisionEngine.hpp
+    include/MDDOEngine.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})
