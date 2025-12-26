@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum
 from neo4j import GraphDatabase
 from app import RelationExtractor, EmotionalAnalyzer
+from hybrid_search import HybridSearchEngine, format_for_llm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,6 +90,10 @@ class RequestType(Enum):
     CONSOLIDATE_ALL_MCT = "consolidate_all_mct"
     CLEANUP_MCT = "cleanup_mct"
     DREAM_CYCLE = "dream_cycle"
+
+    # Recherche hybride
+    HYBRID_SEARCH = "hybrid_search"
+    INDEX_EMBEDDINGS = "index_embeddings"
 
     # Requêtes génériques
     CYPHER_QUERY = "cypher_query"
@@ -207,10 +212,16 @@ class Neo4jService:
             RequestType.CONSOLIDATE_ALL_MCT.value: self._handle_consolidate_all_mct,
             RequestType.CLEANUP_MCT.value: self._handle_cleanup_mct,
             RequestType.DREAM_CYCLE.value: self._handle_dream_cycle,
+            # Recherche hybride
+            RequestType.HYBRID_SEARCH.value: self._handle_hybrid_search,
+            RequestType.INDEX_EMBEDDINGS.value: self._handle_index_embeddings,
             # Requêtes génériques
             RequestType.CYPHER_QUERY.value: self._handle_cypher_query,
             RequestType.BATCH_QUERY.value: self._handle_batch_query,
         }
+
+        # Moteur de recherche hybride (lazy-loaded)
+        self._hybrid_engine = None
 
         logger.info(f"Neo4jService initialisé - Neo4j: {neo4j_uri}, RabbitMQ: {rabbitmq_host}")
 
@@ -1699,6 +1710,101 @@ class Neo4jService:
                 results.append([dict(r) for r in result])
 
         return results
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HANDLERS RECHERCHE HYBRIDE
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _get_hybrid_engine(self) -> HybridSearchEngine:
+        """Retourne le moteur de recherche hybride (lazy-loaded)"""
+        if self._hybrid_engine is None:
+            # Récupérer les infos de connexion depuis le driver existant
+            self._hybrid_engine = HybridSearchEngine(
+                neo4j_uri=self.driver._pool.address[0] if hasattr(self.driver, '_pool') else "bolt://localhost:7687",
+                neo4j_password="",  # Utilise le même driver
+                lazy_load=True
+            )
+            # Réutiliser le driver existant
+            self._hybrid_engine._driver = self.driver
+        return self._hybrid_engine
+
+    def _handle_hybrid_search(self, payload: Dict) -> Dict:
+        """
+        Recherche hybride lexicale/sémantique.
+
+        Payload:
+            query: str - La question à rechercher
+            limit: int - Nombre max de résultats (défaut: 10)
+            format_for_llm: bool - Formater pour LLM (défaut: True)
+
+        Returns:
+            Dict avec résultats et contexte émotionnel
+        """
+        query = payload.get('query', '')
+        limit = payload.get('limit', 10)
+        format_llm = payload.get('format_for_llm', True)
+
+        if not query:
+            return {'error': 'Query is required', 'results': []}
+
+        try:
+            engine = self._get_hybrid_engine()
+            response = engine.search(query, limit=limit)
+
+            result = {
+                'results': [r.to_dict() for r in response.results],
+                'mode_used': response.mode_used.value,
+                'lexical_confidence': response.lexical_confidence,
+                'semantic_coverage': response.semantic_coverage,
+                'query_lemmas': response.query_lemmas
+            }
+
+            if format_llm:
+                result['llm_context'] = format_for_llm(response)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Erreur recherche hybride: {e}")
+            return {'error': str(e), 'results': []}
+
+    def _handle_index_embeddings(self, payload: Dict) -> Dict:
+        """
+        Indexe les embeddings pour les concepts.
+
+        Payload:
+            batch_size: int - Taille des batchs (défaut: 32)
+            force: bool - Ré-indexer tous les concepts (défaut: False)
+            limit: int - Nombre max de concepts à indexer (défaut: None = tous)
+
+        Returns:
+            Statistiques d'indexation
+        """
+        from index_embeddings import EmbeddingIndexer
+
+        batch_size = payload.get('batch_size', 32)
+        force = payload.get('force', False)
+        limit = payload.get('limit')
+
+        try:
+            # Créer un indexeur avec les mêmes paramètres de connexion
+            indexer = EmbeddingIndexer(
+                neo4j_uri="bolt://localhost:7687",  # Sera réutilisé
+                neo4j_password=""
+            )
+            # Réutiliser le driver existant
+            indexer.driver = self.driver
+
+            stats = indexer.index_all(
+                batch_size=batch_size,
+                force=force
+            )
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Erreur indexation embeddings: {e}")
+            return {'error': str(e), 'indexed': 0}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
