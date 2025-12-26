@@ -27,6 +27,8 @@
 #include "ConscienceEngine.hpp"
 #include "ADDOEngine.hpp"
 #include "DecisionEngine.hpp"
+#include "LLMClient.hpp"
+#include "HybridSearchEngine.hpp"
 #include <SimpleAmqpClient/SimpleAmqpClient.h>
 #include <nlohmann/json.hpp>
 #include <atomic>
@@ -239,6 +241,48 @@ public:
     std::shared_ptr<DecisionEngine> getDecisionEngine() { return decision_engine_; }
 
     /**
+     * @brief Retourne le LLMClient (Reformulation Émotionnelle)
+     */
+    std::shared_ptr<LLMClient> getLLMClient() { return llm_client_; }
+
+    /**
+     * @brief Retourne le HybridSearchEngine (Recherche Mémoire)
+     */
+    std::shared_ptr<HybridSearchEngine> getHybridSearchEngine() { return hybrid_search_; }
+
+    /**
+     * @brief Génère une réponse émotionnellement adaptée via LLM
+     * @param question Question utilisateur
+     * @param lemmas Lemmes extraits (du module Python)
+     * @param embedding Embedding de la question (optionnel)
+     * @return Réponse reformulée avec contexte émotionnel
+     */
+    std::string generateEmotionalResponse(
+        const std::string& question,
+        const std::vector<std::string>& lemmas = {},
+        const std::vector<double>& embedding = {}
+    );
+
+    /**
+     * @brief Génère une réponse émotionnelle de façon asynchrone
+     * @param question Question utilisateur
+     * @param lemmas Lemmes extraits
+     * @param embedding Embedding (optionnel)
+     * @param callback Callback appelé avec le résultat
+     */
+    void generateEmotionalResponseAsync(
+        const std::string& question,
+        const std::vector<std::string>& lemmas,
+        const std::vector<double>& embedding,
+        std::function<void(const PipelineResult&)> callback
+    );
+
+    /**
+     * @brief Vérifie si le LLMClient est prêt
+     */
+    [[nodiscard]] bool isLLMReady() const { return llm_client_ && llm_client_->isReady(); }
+
+    /**
      * @brief Récupère l'état de conscience et sentiment actuel
      */
     ConscienceSentimentState getConscienceState() const;
@@ -287,6 +331,8 @@ private:
     std::shared_ptr<ConscienceEngine> conscience_engine_;  // Module Conscience & Sentiments
     std::shared_ptr<ADDOEngine> addo_engine_;              // Module Détermination des Objectifs
     std::shared_ptr<DecisionEngine> decision_engine_;      // Module Prise de Décision Réfléchie
+    std::shared_ptr<LLMClient> llm_client_;                // Module Reformulation Émotionnelle
+    std::shared_ptr<HybridSearchEngine> hybrid_search_;    // Module Recherche Hybride Mémoire
     MatchResult current_match_;
 
     // ID de la dernière émotion ajoutée (pour liaison avec mots)
