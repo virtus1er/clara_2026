@@ -923,16 +923,29 @@ bool MCEEEngine::loadConfig(const std::string& config_path, bool skip_neo4j) {
 }
 
 EmotionalState MCEEEngine::rawToState(
-    const std::unordered_map<std::string, double>& raw) const 
+    const std::unordered_map<std::string, double>& raw) const
 {
     EmotionalState state;
-    
+    double sum = 0.0;
+
     for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
         auto it = raw.find(EMOTION_NAMES[i]);
         if (it != raw.end()) {
             state.emotions[i] = std::clamp(it->second, 0.0, 1.0);
+            sum += state.emotions[i];
         }
     }
+
+    // Calculer E_global (moyenne des 24 émotions)
+    state.E_global = sum / static_cast<double>(NUM_EMOTIONS);
+
+    // Calculer la variance globale
+    double var_sum = 0.0;
+    for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+        double diff = state.emotions[i] - state.E_global;
+        var_sum += diff * diff;
+    }
+    state.variance_global = var_sum / static_cast<double>(NUM_EMOTIONS);
 
     return state;
 }
