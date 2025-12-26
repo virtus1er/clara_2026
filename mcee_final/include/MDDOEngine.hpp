@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "EmotionalState.hpp"
+#include "Types.hpp"
 #include "MemoryManager.hpp"
 #include <string>
 #include <vector>
