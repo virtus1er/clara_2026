@@ -536,8 +536,6 @@ void MCEEEngine::handleSpeechMessage(const std::string& body) {
 }
 
 void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& raw_emotions) {
-    std::cout << "[MCEEEngine] processEmotions() appelé\n" << std::flush;
-
     std::lock_guard<std::mutex> lock(state_mutex_);
 
     // Sauvegarder l'état précédent
@@ -546,12 +544,8 @@ void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& 
     // Convertir en EmotionalState
     current_state_ = rawToState(raw_emotions);
 
-    std::cout << "[MCEEEngine] État converti, E_global=" << current_state_.E_global << "\n" << std::flush;
-
     // Exécuter le pipeline complet
     processPipeline(raw_emotions);
-
-    std::cout << "[MCEEEngine] Pipeline terminé\n" << std::flush;
 }
 
 void MCEEEngine::processSpeechText(const std::string& text, const std::string& source) {
@@ -583,14 +577,10 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     // PIPELINE V3.0 : MCT → PatternMatcher → MLT → MCTGraph
     // ═══════════════════════════════════════════════════════════════════════
 
-    std::cout << "[Pipeline] Début" << std::flush;
-
     // 1. AJOUTER L'ÉTAT À LA MCT
-    std::cout << " → MCT" << std::flush;
     pushToMCT(current_state_);
 
     // 1b. AJOUTER L'ÉTAT AU MCTGRAPH (graphe relationnel)
-    std::cout << " → Graph" << std::flush;
     if (mct_graph_) {
         // Calculer la persistance estimée (basée sur l'intensité)
         double persistence = current_state_.getMeanIntensity() * 5.0;  // 0-5 secondes
@@ -610,26 +600,23 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     }
 
     // 2. IDENTIFIER LE PATTERN VIA PatternMatcher
-    std::cout << " → Pattern" << std::flush;
     MatchResult match = identifyPattern();
     
     // Stocker le match courant
     MatchResult previous_match = current_match_;
     current_match_ = match;
     
-    // Log si transition
+    // Log si transition de pattern
     if (match.is_transition || match.pattern_id != previous_match.pattern_id) {
-        std::cout << "\n[MCEEEngine] Pattern actif: " << match.pattern_name 
-                  << " (sim=" << std::fixed << std::setprecision(3) << match.similarity 
+        std::cout << "[MCEEEngine] Pattern actif: " << match.pattern_name
+                  << " (sim=" << std::fixed << std::setprecision(3) << match.similarity
                   << ", conf=" << match.confidence << ")\n";
     }
-    
+
     // 3. APPLIQUER LES COEFFICIENTS DU PATTERN
-    std::cout << " → Coefs" << std::flush;
     EmotionalState processed_state = applyPatternCoefficients(current_state_, match);
 
     // 4. RÉCUPÉRER LES SOUVENIRS PERTINENTS (legacy)
-    std::cout << " → Mem" << std::flush;
     Phase current_phase = phase_detector_.getCurrentPhase();
     auto memories = memory_manager_.queryRelevantMemories(current_phase, current_state_, 10);
 
@@ -638,7 +625,6 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     }
 
     // 5. VÉRIFIER AMYGHALEON (court-circuit d'urgence)
-    std::cout << " → Amyg" << std::flush;
     handleEmergency(match);
     
     // 6. CALCULER LE DELTA TEMPS
@@ -700,11 +686,9 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     }
     
     // 14. CONSOLIDER EN MLT SI SIGNIFICATIF
-    std::cout << " → MLT" << std::flush;
     consolidateToMLT();
 
     // 15. ENREGISTRER UN SOUVENIR SI SIGNIFICATIF
-    std::cout << " → Rec" << std::flush;
     if (current_state_.getMeanIntensity() > match.memory_trigger_threshold) {
         auto [dominant, value] = current_state_.getDominant();
         std::string context = "Pattern:" + match.pattern_name + "_" + dominant;
@@ -712,7 +696,6 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     }
 
     // 16. PUBLIER L'ÉTAT
-    std::cout << " → Pub\n" << std::flush;
     publishState();
     
     // 17. CALLBACK
