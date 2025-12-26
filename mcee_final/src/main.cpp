@@ -183,23 +183,18 @@ int main(int argc, char* argv[]) {
         // Créer le moteur MCEE
         MCEEEngine engine(config);
 
-        // Charger la configuration (sans Neo4j en mode démo)
-        std::cout << "[Main] Chargement configuration..." << std::endl << std::flush;
+        // Charger la configuration de base (SANS Neo4j pour ne pas bloquer)
+        std::cout << "[Main] Chargement configuration (phase)..." << std::endl << std::flush;
         if (std::ifstream(config_file).good()) {
-            engine.loadConfig(config_file, demo_mode);  // skip_neo4j = true en mode démo
-            std::cout << "[Main] loadConfig() terminé" << std::endl << std::flush;
-            if (demo_mode) {
-                std::cout << "[Main] Mode démo: Neo4j désactivé" << std::endl;
-            }
+            engine.loadConfig(config_file, true);  // skip_neo4j = true pour l'instant
+            std::cout << "[Main] Configuration de base chargée" << std::endl << std::flush;
         } else {
             std::cout << "[Main] Fichier config non trouvé, utilisation des valeurs par défaut" << std::endl;
         }
-        std::cout << "[Main] Configuration chargée" << std::endl << std::flush;
 
         // Définir un callback pour afficher les changements d'état
         engine.setStateCallback([](const EmotionalState& state, const std::string& pattern_name) {
             // Le callback est appelé à chaque mise à jour
-            // On peut ajouter du logging ou des actions ici
         });
 
         if (demo_mode) {
@@ -207,14 +202,22 @@ int main(int argc, char* argv[]) {
             runDemo(engine);
         } else {
             // Mode normal avec RabbitMQ
-            std::cout << "[Main] Tentative de démarrage du moteur..." << std::endl;
+            // IMPORTANT: Démarrer le consumer RabbitMQ EN PREMIER
+            std::cout << "[Main] Démarrage du moteur (RabbitMQ)..." << std::endl << std::flush;
 
             if (!engine.start()) {
                 std::cerr << "[Main] Échec du démarrage du moteur MCEE" << std::endl;
                 return 1;
             }
 
-            std::cout << "[Main] MCEE en cours d'exécution. Appuyez sur Ctrl+C pour arrêter." << std::endl;
+            std::cout << "[Main] MCEE actif et en écoute RabbitMQ" << std::endl;
+
+            // ENSUITE initialiser Neo4j (peut bloquer, mais MCEE consomme déjà)
+            std::cout << "[Main] Initialisation Neo4j en arrière-plan..." << std::endl << std::flush;
+            engine.loadConfig(config_file, false);  // Maintenant charger Neo4j
+            std::cout << "[Main] Neo4j initialisé" << std::endl << std::flush;
+
+            std::cout << "[Main] MCEE prêt. Appuyez sur Ctrl+C pour arrêter." << std::endl;
 
             // Boucle principale
             while (g_running.load() && engine.isRunning()) {
