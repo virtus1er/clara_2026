@@ -1358,10 +1358,56 @@ std::string MCEEEngine::generateEmotionalResponse(
         return "";
     }
 
-    // Construire le contexte émotionnel
+    // 1. TOUJOURS construire le contexte depuis les émotions en temps réel
     LLMContext context;
 
-    // 1. Recherche hybride dans la mémoire (si disponible)
+    // Récupérer l'état de conscience actuel (Ft, Ct)
+    if (conscience_engine_) {
+        auto state = conscience_engine_->getCurrentState();
+        context.Ft = state.sentiment;
+        context.Ct = state.consciousness_level;
+        context.sentiment_label = state.sentiment > 0.2 ? "positif" :
+                                  (state.sentiment < -0.2 ? "négatif" : "neutre");
+    }
+
+    // Construire le contexte depuis l'état émotionnel actuel (émotions temps réel)
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+
+        // Extraire les émotions significatives (> 0.3)
+        for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+            if (current_state_.emotions[i] > 0.3) {
+                EmotionScore es;
+                es.name = EMOTION_NAMES[i];
+                es.score = current_state_.emotions[i];
+                es.trigger = "temps_réel";
+                context.emotions.push_back(es);
+            }
+        }
+
+        // Trier par score décroissant
+        std::sort(context.emotions.begin(), context.emotions.end(),
+            [](const EmotionScore& a, const EmotionScore& b) {
+                return a.score > b.score;
+            });
+
+        // Dominante
+        if (!context.emotions.empty()) {
+            context.dominant_emotion = context.emotions[0].name;
+            context.dominant_score = context.emotions[0].score;
+        }
+    }
+
+    std::cout << "[MCEEEngine] État émotionnel temps réel: Ft=" << std::fixed << std::setprecision(2)
+              << context.Ft << " Ct=" << context.Ct;
+    if (!context.dominant_emotion.empty()) {
+        std::cout << " dominant=" << context.dominant_emotion
+                  << "(" << static_cast<int>(context.dominant_score * 100) << "%)";
+    }
+    std::cout << "\n";
+
+    // 2. Enrichir avec la recherche mémoire (si disponible et si lemmas fournis)
+    bool memory_found = false;
     if (hybrid_search_ && !lemmas.empty()) {
         std::vector<ParsedToken> tokens;
         for (const auto& lemma : lemmas) {
@@ -1374,31 +1420,45 @@ std::string MCEEEngine::generateEmotionalResponse(
         }
 
         auto search_result = hybrid_search_->search(question, tokens, embedding);
-        context = search_result.context;
 
-        std::cout << "[MCEEEngine] Recherche mémoire: "
-                  << search_result.results.size() << " résultats, "
-                  << "confiance=" << std::fixed << std::setprecision(2)
-                  << search_result.overall_confidence << "\n";
-    } else {
-        // Fallback: construire un contexte basique depuis l'état actuel
-        if (conscience_engine_) {
-            auto state = conscience_engine_->getCurrentState();
-            context.Ft = state.sentiment;
-            context.Ct = state.consciousness_level;
-            context.sentiment_label = state.sentiment > 0.2 ? "positif" :
-                                      (state.sentiment < -0.2 ? "négatif" : "neutre");
+        if (!search_result.results.empty()) {
+            memory_found = true;
+
+            // Fusionner les mots-clés de la mémoire
+            for (const auto& result : search_result.results) {
+                for (const auto& kw : result.keywords) {
+                    if (std::find(context.context_words.begin(),
+                                  context.context_words.end(), kw) == context.context_words.end()) {
+                        context.context_words.push_back(kw);
+                    }
+                }
+                // Ajouter les souvenirs activés
+                if (!result.memory_name.empty() && context.activated_memories.size() < 5) {
+                    context.activated_memories.push_back(result.memory_name);
+                }
+            }
+
+            context.search_confidence = search_result.overall_confidence;
+
+            std::cout << "[MCEEEngine] Mémoire enrichie: "
+                      << search_result.results.size() << " souvenirs, "
+                      << "confiance=" << search_result.overall_confidence << "\n";
         }
-
-        // Ajouter les émotions dominantes
-        context = LLMContext::fromEmotionalState(
-            current_state_,
-            context.Ft,
-            context.Ct
-        );
     }
 
-    // 2. Générer la réponse via LLM
+    if (!memory_found) {
+        std::cout << "[MCEEEngine] Pas de souvenir trouvé - utilisation émotions temps réel uniquement\n";
+    }
+
+    // Ajouter les lemmas comme mots-clés contextuels
+    for (const auto& lemma : lemmas) {
+        if (std::find(context.context_words.begin(),
+                      context.context_words.end(), lemma) == context.context_words.end()) {
+            context.context_words.push_back(lemma);
+        }
+    }
+
+    // 3. Générer la réponse via LLM
     LLMRequest request;
     request.user_question = question;
     request.emotional_context = context;
@@ -1436,8 +1496,40 @@ void MCEEEngine::generateEmotionalResponseAsync(
         PipelineResult result;
         auto start_time = std::chrono::steady_clock::now();
 
-        // Recherche mémoire
+        // 1. TOUJOURS construire depuis les émotions temps réel
         LLMContext context;
+
+        if (conscience_engine_) {
+            auto state = conscience_engine_->getCurrentState();
+            context.Ft = state.sentiment;
+            context.Ct = state.consciousness_level;
+            context.sentiment_label = state.sentiment > 0.2 ? "positif" :
+                                      (state.sentiment < -0.2 ? "négatif" : "neutre");
+        }
+
+        // Émotions temps réel
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+                if (current_state_.emotions[i] > 0.3) {
+                    EmotionScore es;
+                    es.name = EMOTION_NAMES[i];
+                    es.score = current_state_.emotions[i];
+                    es.trigger = "temps_réel";
+                    context.emotions.push_back(es);
+                }
+            }
+            std::sort(context.emotions.begin(), context.emotions.end(),
+                [](const EmotionScore& a, const EmotionScore& b) {
+                    return a.score > b.score;
+                });
+            if (!context.emotions.empty()) {
+                context.dominant_emotion = context.emotions[0].name;
+                context.dominant_score = context.emotions[0].score;
+            }
+        }
+
+        // 2. Enrichir avec recherche mémoire si disponible
         if (hybrid_search_ && !lemmas.empty()) {
             std::vector<ParsedToken> tokens;
             for (const auto& lemma : lemmas) {
@@ -1454,13 +1546,24 @@ void MCEEEngine::generateEmotionalResponseAsync(
 
             result.search_time_ms = std::chrono::duration<double, std::milli>(
                 search_end - search_start).count();
-            context = search_result.context;
-        } else {
-            // Contexte basique
-            if (conscience_engine_) {
-                auto state = conscience_engine_->getCurrentState();
-                context = LLMContext::fromEmotionalState(current_state_, state.sentiment, state.consciousness_level);
+
+            // Fusionner si résultats trouvés
+            if (!search_result.results.empty()) {
+                for (const auto& r : search_result.results) {
+                    for (const auto& kw : r.keywords) {
+                        context.context_words.push_back(kw);
+                    }
+                    if (!r.memory_name.empty()) {
+                        context.activated_memories.push_back(r.memory_name);
+                    }
+                }
+                context.search_confidence = search_result.overall_confidence;
             }
+        }
+
+        // Ajouter lemmas
+        for (const auto& lemma : lemmas) {
+            context.context_words.push_back(lemma);
         }
 
         result.context = context;
