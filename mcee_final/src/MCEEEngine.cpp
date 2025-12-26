@@ -894,10 +894,11 @@ bool MCEEEngine::loadConfig(const std::string& config_path, bool skip_neo4j) {
                     neo4j_config.max_retries = neo4j_json.value("max_retries", 3);
                     neo4j_config.async_mode = neo4j_json.value("async_mode", true);
 
+                    std::cout << "[MCEEEngine] Configuration Neo4j..." << std::flush;
                     if (memory_manager_.setNeo4jConfig(neo4j_config)) {
-                        std::cout << "[MCEEEngine] Neo4j activé et connecté\n";
+                        std::cout << " activé et connecté" << std::endl;
                     } else {
-                        std::cerr << "[MCEEEngine] Neo4j configuré mais non connecté\n";
+                        std::cerr << " configuré mais non connecté" << std::endl;
                     }
                 }
             }

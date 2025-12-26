@@ -184,16 +184,17 @@ int main(int argc, char* argv[]) {
         MCEEEngine engine(config);
 
         // Charger la configuration (sans Neo4j en mode démo)
-        std::cout << "[Main] Chargement configuration..." << std::endl;
+        std::cout << "[Main] Chargement configuration..." << std::endl << std::flush;
         if (std::ifstream(config_file).good()) {
             engine.loadConfig(config_file, demo_mode);  // skip_neo4j = true en mode démo
+            std::cout << "[Main] loadConfig() terminé" << std::endl << std::flush;
             if (demo_mode) {
                 std::cout << "[Main] Mode démo: Neo4j désactivé" << std::endl;
             }
         } else {
             std::cout << "[Main] Fichier config non trouvé, utilisation des valeurs par défaut" << std::endl;
         }
-        std::cout << "[Main] Configuration chargée" << std::endl;
+        std::cout << "[Main] Configuration chargée" << std::endl << std::flush;
 
         // Définir un callback pour afficher les changements d'état
         engine.setStateCallback([](const EmotionalState& state, const std::string& pattern_name) {
