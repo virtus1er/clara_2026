@@ -163,12 +163,16 @@ bool LLMClient::initialize() {
 
 bool LLMClient::initRabbitMQ() {
     try {
-        // Construire la chaîne de connexion AMQP
-        std::string amqp_uri = "amqp://" + config_.rabbitmq_user + ":" +
-            config_.rabbitmq_password + "@" + config_.rabbitmq_host + ":" +
-            std::to_string(config_.rabbitmq_port) + "/";
+        // Construire les options de connexion
+        AmqpClient::Channel::OpenOpts opts;
+        opts.host = config_.rabbitmq_host;
+        opts.port = config_.rabbitmq_port;
+        opts.auth = AmqpClient::Channel::OpenOpts::BasicAuth{
+            config_.rabbitmq_user,
+            config_.rabbitmq_password
+        };
 
-        channel_ = AmqpClient::Channel::Open(amqp_uri);
+        channel_ = AmqpClient::Channel::Open(opts);
 
         // Déclarer l'exchange de requêtes
         channel_->DeclareExchange(
