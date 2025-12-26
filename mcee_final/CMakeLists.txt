@@ -20,6 +20,9 @@ FetchContent_MakeAvailable(nlohmann_json)
 # Find Boost (system install required)
 find_package(Boost REQUIRED COMPONENTS system thread)
 
+# Find CURL (for LLMClient direct HTTP mode)
+find_package(CURL REQUIRED)
+
 # SimpleAmqpClient (system install required)
 find_path(SIMPLE_AMQP_CLIENT_INCLUDE_DIR
     NAMES SimpleAmqpClient/SimpleAmqpClient.h
@@ -41,6 +44,7 @@ link_directories(/usr/local/lib)
 
 include_directories(${SIMPLE_AMQP_CLIENT_INCLUDE_DIR})
 include_directories(${Boost_INCLUDE_DIRS})
+include_directories(${CURL_INCLUDE_DIRS})
 
 # Source files - Version 3.0 avec MCT/MLT + Neo4j + MCTGraph + Conscience + ADDO + Decision + MDDO
 set(MCEE_SOURCES
@@ -60,6 +64,8 @@ set(MCEE_SOURCES
     src/ADDOEngine.cpp
     src/DecisionEngine.cpp
     src/MDDOEngine.cpp
+    src/LLMClient.cpp
+    src/HybridSearchEngine.cpp
 )
 
 set(MCEE_HEADERS
@@ -83,6 +89,8 @@ set(MCEE_HEADERS
     include/DecisionConfig.hpp
     include/DecisionEngine.hpp
     include/MDDOEngine.hpp
+    include/LLMClient.hpp
+    include/HybridSearchEngine.hpp
 )
 
 add_executable(mcee ${MCEE_SOURCES} ${MCEE_HEADERS})
@@ -94,6 +102,7 @@ target_link_libraries(mcee PRIVATE
     ${SIMPLE_AMQP_CLIENT_LIBRARY}
     rabbitmq
     ${Boost_LIBRARIES}
+    ${CURL_LIBRARIES}
 )
 
 # Copy config file to build directory
