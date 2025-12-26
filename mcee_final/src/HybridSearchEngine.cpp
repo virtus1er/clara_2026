@@ -616,7 +616,7 @@ LLMContext HybridSearchEngine::buildContext(
 
                 // Chercher le trigger dans les keywords
                 for (const auto& result : results) {
-                    if (result.emotions[i] > 0.3 && !result.keywords.empty()) {
+                    if (result.emotions[i] >= 0.4 && result.emotions[i] <= 1.0 && !result.keywords.empty()) {
                         es.trigger = result.keywords[0];
                         break;
                     }

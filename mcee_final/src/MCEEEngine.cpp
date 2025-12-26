@@ -1374,9 +1374,9 @@ std::string MCEEEngine::generateEmotionalResponse(
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
 
-        // Extraire les émotions significatives (> 0.3)
+        // Extraire les émotions significatives (entre 0.4 et 1.0)
         for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
-            if (current_state_.emotions[i] > 0.3) {
+            if (current_state_.emotions[i] >= 0.4 && current_state_.emotions[i] <= 1.0) {
                 EmotionScore es;
                 es.name = EMOTION_NAMES[i];
                 es.score = current_state_.emotions[i];
@@ -1507,11 +1507,11 @@ void MCEEEngine::generateEmotionalResponseAsync(
                                       (state.sentiment < -0.2 ? "négatif" : "neutre");
         }
 
-        // Émotions temps réel
+        // Émotions temps réel (entre 0.4 et 1.0)
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
             for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
-                if (current_state_.emotions[i] > 0.3) {
+                if (current_state_.emotions[i] >= 0.4 && current_state_.emotions[i] <= 1.0) {
                     EmotionScore es;
                     es.name = EMOTION_NAMES[i];
                     es.score = current_state_.emotions[i];

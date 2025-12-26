@@ -125,9 +125,9 @@ struct LLMContext {
         ctx.Ct = ct;
         ctx.sentiment_label = ft > 0.2 ? "positif" : (ft < -0.2 ? "négatif" : "neutre");
 
-        // Extraire les émotions significatives (> 0.3)
+        // Extraire les émotions significatives (entre 0.4 et 1.0)
         for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
-            if (state.emotions[i] > 0.3) {
+            if (state.emotions[i] >= 0.4 && state.emotions[i] <= 1.0) {
                 EmotionScore es;
                 es.name = EMOTION_NAMES[i];
                 es.score = state.emotions[i];
