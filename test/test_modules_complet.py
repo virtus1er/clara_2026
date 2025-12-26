@@ -29,6 +29,16 @@ SNAPSHOT_EXCHANGE = 'mcee.mct.snapshot'
 NEO4J_REQUEST_QUEUE = 'neo4j.requests.queue'
 NEO4J_RESPONSE_EXCHANGE = 'neo4j.responses'
 
+# Les 24 émotions exactes attendues par MCEE (Types.hpp)
+EMOTION_NAMES = [
+    "Admiration", "Adoration", "Appréciation esthétique", "Amusement",
+    "Anxiété", "Émerveillement", "Gêne", "Ennui",
+    "Calme", "Confusion", "Dégoût", "Douleur empathique",
+    "Fascination", "Excitation", "Peur", "Horreur",
+    "Intérêt", "Joie", "Nostalgie", "Soulagement",
+    "Tristesse", "Satisfaction", "Sympathie", "Triomphe"
+]
+
 
 class MCEEModuleTester:
     """Testeur complet des modules MCEE"""
@@ -129,12 +139,16 @@ class MCEEModuleTester:
         time.sleep(1.0)  # Attendre que le consumer démarre
 
     def send_emotions(self, emotions: list, name: str = "test"):
-        """Envoie un vecteur de 24 émotions au MCEE"""
-        message = {
-            "emotions": emotions,
-            "timestamp": time.time(),
-            "source": "test_modules"
-        }
+        """Envoie un vecteur de 24 émotions au MCEE
+
+        Le format attendu par MCEE est un dict avec les noms d'émotions:
+        {"Admiration": 0.5, "Joie": 0.8, ...}
+        """
+        # Convertir la liste en dict avec les noms d'émotions
+        message = {emo_name: val for emo_name, val in zip(EMOTION_NAMES, emotions)}
+        message["timestamp"] = time.time()
+        message["source"] = "test_modules"
+
         self.channel.basic_publish(
             exchange=EMOTIONS_EXCHANGE,
             routing_key=EMOTIONS_ROUTING_KEY,

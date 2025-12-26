@@ -30,6 +30,16 @@ EMOTIONS_EXCHANGE = 'mcee.emotional.input'
 EMOTIONS_ROUTING_KEY = 'emotions.predictions'
 OUTPUT_EXCHANGE = 'mcee.emotional.output'
 
+# Les 24 émotions exactes attendues par MCEE (Types.hpp)
+EMOTION_NAMES = [
+    "Admiration", "Adoration", "Appréciation esthétique", "Amusement",
+    "Anxiété", "Émerveillement", "Gêne", "Ennui",
+    "Calme", "Confusion", "Dégoût", "Douleur empathique",
+    "Fascination", "Excitation", "Peur", "Horreur",
+    "Intérêt", "Joie", "Nostalgie", "Soulagement",
+    "Tristesse", "Satisfaction", "Sympathie", "Triomphe"
+]
+
 
 @dataclass
 class ValidationResult:
@@ -109,13 +119,12 @@ class BehavioralValidator:
         time.sleep(0.5)
 
     def send_emotions(self, emotions: list):
-        """Envoie un vecteur de 24 émotions"""
-        message = {
-            "emotions": emotions,
-            "timestamp": time.time(),
-            "source": "behavioral_test",
-            "_send_time": time.perf_counter()
-        }
+        """Envoie un vecteur de 24 émotions (format dict avec noms)"""
+        # Convertir la liste en dict avec les noms d'émotions
+        message = {emo_name: val for emo_name, val in zip(EMOTION_NAMES, emotions)}
+        message["timestamp"] = time.time()
+        message["source"] = "behavioral_test"
+        message["_send_time"] = time.perf_counter()
 
         self.channel.basic_publish(
             exchange=EMOTIONS_EXCHANGE,

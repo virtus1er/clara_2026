@@ -22,6 +22,16 @@ EMOTIONS_EXCHANGE = 'mcee.emotional.input'
 EMOTIONS_ROUTING_KEY = 'emotions.predictions'
 OUTPUT_EXCHANGE = 'mcee.emotional.output'
 
+# Les 24 émotions exactes attendues par MCEE (Types.hpp)
+EMOTION_NAMES = [
+    "Admiration", "Adoration", "Appréciation esthétique", "Amusement",
+    "Anxiété", "Émerveillement", "Gêne", "Ennui",
+    "Calme", "Confusion", "Dégoût", "Douleur empathique",
+    "Fascination", "Excitation", "Peur", "Horreur",
+    "Intérêt", "Joie", "Nostalgie", "Soulagement",
+    "Tristesse", "Satisfaction", "Sympathie", "Triomphe"
+]
+
 
 class LatencyTester:
     """Testeur de latence MCEE"""
@@ -101,12 +111,11 @@ class LatencyTester:
 
     def send_emotion_timed(self, test_id: str, emotions: list):
         """Envoie une émotion et enregistre le temps d'envoi"""
-        message = {
-            "emotions": emotions,
-            "timestamp": time.time(),
-            "source": "latency_test",
-            "test_id": test_id
-        }
+        # Convertir la liste en dict avec les noms d'émotions
+        message = {emo_name: val for emo_name, val in zip(EMOTION_NAMES, emotions)}
+        message["timestamp"] = time.time()
+        message["source"] = "latency_test"
+        message["test_id"] = test_id
 
         send_time = time.perf_counter()
         self.response_times[test_id] = send_time
