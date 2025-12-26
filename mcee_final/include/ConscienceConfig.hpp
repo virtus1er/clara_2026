@@ -61,6 +61,9 @@ struct ConscienceConfig {
     double wisdom_base = 1.0;            // Sagesse de base (alias)
     double wisdom_growth_rate = 0.001;   // Croissance par expérience
     double wisdom_max = 2.0;             // Plafond de sagesse
+    double wisdom_decay_rate = 0.9999;   // Décroissance lente par cycle (évite rigidité)
+    double wisdom_floor = 0.8;           // Plancher de sagesse (ne descend pas en dessous)
+    double experience_decay_rate = 0.999; // Décroissance de l'expérience accumulée
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PARAMÈTRES SENTIMENTS (Ft)

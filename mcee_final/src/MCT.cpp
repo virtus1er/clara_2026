@@ -9,6 +9,7 @@
 #include <cmath>
 #include <sstream>
 #include <iomanip>
+#include <iostream>
 
 namespace mcee {
 
@@ -24,25 +25,52 @@ MCT::MCT(const MCTConfig& config) : config_(config) {}
 // GESTION DU BUFFER
 // ═══════════════════════════════════════════════════════════════════════════
 
-void MCT::push(const EmotionalState& state) {
+bool MCT::push(const EmotionalState& state) {
+    // Validation avant insertion (sans lock pour éviter deadlock)
+    if (config_.enable_input_validation) {
+        ValidationResult validation = validate(state);
+
+        if (!validation.valid) {
+            // Notifier le callback si défini
+            if (validation_callback_) {
+                validation_callback_(validation);
+            }
+
+            if (config_.log_validation_errors) {
+                std::cerr << "[MCT] Validation error: " << validation.error_code
+                          << " - " << validation.error_message << "\n";
+            }
+
+            if (config_.reject_on_validation_failure) {
+                return false;
+            }
+            // Sinon, on sanitize et on continue
+        }
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
-    
-    TimestampedState ts(state);
+
+    // Sanitize l'état si la validation est active (même si valide, clamp les valeurs)
+    EmotionalState safe_state = config_.enable_input_validation ? sanitize(state) : state;
+
+    TimestampedState ts(safe_state);
     buffer_.push_back(ts);
-    
+
     // Limite de taille
     while (buffer_.size() > config_.max_size) {
         buffer_.pop_front();
     }
-    
+
     invalidateCache();
-    
+
     // Callbacks
     if (stability_callback_ && buffer_.size() >= 2) {
         auto stability = getStability();
         auto volatility = getVolatility();
         stability_callback_(stability, volatility);
     }
+
+    return true;
 }
 
 void MCT::pushWithSpeech(const EmotionalState& state, 
@@ -216,10 +244,18 @@ std::optional<EmotionalSignature> MCT::extractSignature() const {
         sig.std_dev[i] = std::sqrt(sum_sq / buffer_.size());
     }
     
-    // Tendance par émotion (différence début/fin)
-    if (buffer_.size() >= 3) {
+    // Tendance, accélération, position du pic, oscillations
+    sig.trend.fill(0.0);
+    sig.acceleration.fill(0.0);
+    sig.peak_position.fill(0.5);
+    sig.oscillation_count.fill(0);
+
+    if (buffer_.size() >= 5) {
+        size_t quarter = buffer_.size() / 4;
         size_t third = buffer_.size() / 3;
+
         for (size_t i = 0; i < 24; ++i) {
+            // Tendance (1ère dérivée) : différence début/fin
             double early_avg = 0.0, late_avg = 0.0;
             for (size_t j = 0; j < third; ++j) {
                 early_avg += buffer_[j].state.emotions[i];
@@ -230,9 +266,42 @@ std::optional<EmotionalSignature> MCT::extractSignature() const {
             early_avg /= third;
             late_avg /= third;
             sig.trend[i] = late_avg - early_avg;
+
+            // Accélération (2ème dérivée) : différence des tendances
+            double mid_avg = 0.0;
+            size_t mid_start = buffer_.size() / 3;
+            size_t mid_end = 2 * buffer_.size() / 3;
+            for (size_t j = mid_start; j < mid_end; ++j) {
+                mid_avg += buffer_[j].state.emotions[i];
+            }
+            mid_avg /= (mid_end - mid_start);
+            double early_trend = mid_avg - early_avg;
+            double late_trend = late_avg - mid_avg;
+            sig.acceleration[i] = late_trend - early_trend;
+
+            // Position du pic [0, 1]
+            double max_val = 0.0;
+            size_t max_pos = 0;
+            for (size_t j = 0; j < buffer_.size(); ++j) {
+                if (buffer_[j].state.emotions[i] > max_val) {
+                    max_val = buffer_[j].state.emotions[i];
+                    max_pos = j;
+                }
+            }
+            sig.peak_position[i] = static_cast<double>(max_pos) / buffer_.size();
+
+            // Oscillations (changements de direction)
+            int oscillations = 0;
+            double prev_diff = 0.0;
+            for (size_t j = 1; j < buffer_.size(); ++j) {
+                double diff = buffer_[j].state.emotions[i] - buffer_[j-1].state.emotions[i];
+                if (j > 1 && prev_diff * diff < 0 && std::abs(diff) > 0.01) {
+                    oscillations++;
+                }
+                prev_diff = diff;
+            }
+            sig.oscillation_count[i] = oscillations;
         }
-    } else {
-        sig.trend.fill(0.0);
     }
     
     // Métriques globales
@@ -254,7 +323,26 @@ std::optional<EmotionalSignature> MCT::extractSignature() const {
     // Stabilité
     double avg_std = std::accumulate(sig.std_dev.begin(), sig.std_dev.end(), 0.0) / 24.0;
     sig.stability = std::max(0.0, 1.0 - avg_std * 2.0);
-    
+
+    // Fréquence dominante (estimation simple basée sur oscillations E_global)
+    if (buffer_.size() >= 10) {
+        int global_oscillations = 0;
+        double prev_e = buffer_[0].state.E_global;
+        double prev_diff = 0.0;
+        for (size_t j = 1; j < buffer_.size(); ++j) {
+            double diff = buffer_[j].state.E_global - prev_e;
+            if (j > 1 && prev_diff * diff < 0 && std::abs(diff) > 0.02) {
+                global_oscillations++;
+            }
+            prev_diff = diff;
+            prev_e = buffer_[j].state.E_global;
+        }
+        // Fréquence = oscillations / durée en secondes
+        sig.dominant_frequency = global_oscillations / config_.time_window_seconds;
+    } else {
+        sig.dominant_frequency = 0.0;
+    }
+
     return sig;
 }
 
@@ -429,25 +517,153 @@ double MCT::computeWeight(const std::chrono::steady_clock::time_point& timestamp
 
 std::array<double, 24> MCT::computeVelocity() const {
     std::array<double, 24> velocity{};
-    
+
     if (buffer_.size() < 2) {
         return velocity;
     }
-    
+
     // Différence entre état actuel et état précédent
     const auto& current = buffer_.back();
     const auto& previous = buffer_[buffer_.size() - 2];
-    
+
     double dt = std::chrono::duration<double>(current.timestamp - previous.timestamp).count();
     if (dt < 1e-6) {
         return velocity;
     }
-    
+
     for (size_t i = 0; i < 24; ++i) {
         velocity[i] = (current.state.emotions[i] - previous.state.emotions[i]) / dt;
     }
-    
+
     return velocity;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VALIDATION D'ENTRÉE
+// ═══════════════════════════════════════════════════════════════════════════
+
+ValidationResult MCT::validate(const EmotionalState& state) const {
+    ValidationResult result;
+    result.valid = true;
+
+    // 1. Vérifier les valeurs NaN ou infinies
+    for (size_t i = 0; i < 24; ++i) {
+        if (std::isnan(state.emotions[i]) || std::isinf(state.emotions[i])) {
+            result.valid = false;
+            result.error_code = "NAN_OR_INF";
+            result.error_message = "Emotion " + std::to_string(i) + " contient NaN ou Inf";
+            result.invalid_emotion_index = i;
+            result.invalid_value = state.emotions[i];
+            return result;
+        }
+    }
+
+    // Vérifier E_global aussi
+    if (std::isnan(state.E_global) || std::isinf(state.E_global)) {
+        result.valid = false;
+        result.error_code = "NAN_OR_INF";
+        result.error_message = "E_global contient NaN ou Inf";
+        result.invalid_value = state.E_global;
+        return result;
+    }
+
+    // 2. Vérifier les valeurs hors limites
+    for (size_t i = 0; i < 24; ++i) {
+        if (state.emotions[i] < config_.emotion_min || state.emotions[i] > config_.emotion_max) {
+            result.valid = false;
+            result.error_code = "OUT_OF_RANGE";
+            result.error_message = "Emotion " + std::to_string(i) + " hors limites [" +
+                                   std::to_string(config_.emotion_min) + ", " +
+                                   std::to_string(config_.emotion_max) + "]";
+            result.invalid_emotion_index = i;
+            result.invalid_value = state.emotions[i];
+            return result;
+        }
+    }
+
+    // 3. Vérifier qu'il y a au moins quelques émotions non-nulles (détection panne capteur)
+    size_t nonzero_count = 0;
+    for (size_t i = 0; i < 24; ++i) {
+        if (state.emotions[i] > 0.001) {
+            nonzero_count++;
+        }
+    }
+    if (nonzero_count < static_cast<size_t>(config_.min_nonzero_emotions)) {
+        result.valid = false;
+        result.error_code = "ALL_ZERO";
+        result.error_message = "Moins de " + std::to_string(config_.min_nonzero_emotions) +
+                               " émotions non-nulles (état potentiellement invalide)";
+        result.invalid_value = static_cast<double>(nonzero_count);
+        return result;
+    }
+
+    // 4. Vérifier les sauts extrêmes par rapport à l'état précédent
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!buffer_.empty()) {
+            const auto& prev_state = buffer_.back().state;
+            for (size_t i = 0; i < 24; ++i) {
+                double jump = std::abs(state.emotions[i] - prev_state.emotions[i]);
+                if (jump > config_.max_jump_threshold) {
+                    result.valid = false;
+                    result.error_code = "EXTREME_JUMP";
+                    result.error_message = "Emotion " + std::to_string(i) +
+                                           " a sauté de " + std::to_string(jump) +
+                                           " (max autorisé: " + std::to_string(config_.max_jump_threshold) + ")";
+                    result.invalid_emotion_index = i;
+                    result.invalid_value = jump;
+                    return result;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+EmotionalState MCT::sanitize(const EmotionalState& state) const {
+    EmotionalState safe = state;
+
+    // Clamp toutes les émotions dans les limites
+    for (size_t i = 0; i < 24; ++i) {
+        // Remplacer NaN/Inf par 0
+        if (std::isnan(safe.emotions[i]) || std::isinf(safe.emotions[i])) {
+            safe.emotions[i] = 0.0;
+        }
+        // Clamp dans les limites
+        safe.emotions[i] = std::clamp(safe.emotions[i], config_.emotion_min, config_.emotion_max);
+    }
+
+    // Limiter les sauts extrêmes si on a un état précédent
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!buffer_.empty()) {
+            const auto& prev_state = buffer_.back().state;
+            for (size_t i = 0; i < 24; ++i) {
+                double diff = safe.emotions[i] - prev_state.emotions[i];
+                if (std::abs(diff) > config_.max_jump_threshold) {
+                    // Limiter le saut au max autorisé
+                    double sign = (diff > 0) ? 1.0 : -1.0;
+                    safe.emotions[i] = prev_state.emotions[i] + sign * config_.max_jump_threshold;
+                }
+            }
+        }
+    }
+
+    // Recalculer E_global
+    double sum = 0.0;
+    for (size_t i = 0; i < 24; ++i) {
+        sum += safe.emotions[i];
+    }
+    safe.E_global = sum / 24.0;
+
+    // Sanitizer variance_global
+    if (std::isnan(safe.variance_global) || std::isinf(safe.variance_global)) {
+        safe.variance_global = 0.0;
+    }
+    safe.variance_global = std::max(0.0, safe.variance_global);
+
+    return safe;
 }
 
 } // namespace mcee
