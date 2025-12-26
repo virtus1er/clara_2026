@@ -52,6 +52,15 @@ class MCEEModuleTester:
         self.channel.exchange_declare(exchange=EMOTIONS_EXCHANGE, exchange_type='topic', durable=True)
         self.channel.exchange_declare(exchange=SPEECH_EXCHANGE, exchange_type='topic', durable=True)
 
+        # Déclarer aussi les queues MCEE (évite perte de messages si MCEE pas encore démarré)
+        self.channel.queue_declare(queue='mcee_emotions_queue', durable=True)
+        self.channel.queue_bind(queue='mcee_emotions_queue', exchange=EMOTIONS_EXCHANGE, routing_key=EMOTIONS_ROUTING_KEY)
+
+        self.channel.queue_declare(queue='mcee_speech_queue', durable=True)
+        self.channel.queue_bind(queue='mcee_speech_queue', exchange=SPEECH_EXCHANGE, routing_key=SPEECH_ROUTING_KEY)
+
+        print("  ✓ Queues MCEE créées/vérifiées")
+
         return True
 
     def close(self):
