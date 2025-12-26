@@ -283,49 +283,61 @@ class MCEEAdvancedTest:
         self.channel.exchange_declare(exchange="mcee.speech.input", exchange_type='topic', durable=True)
         self.channel.exchange_declare(exchange="mcee.emotional.output", exchange_type='topic', durable=True)
     
-    def check_mcee_ready(self) -> bool:
+    def check_mcee_ready(self) -> tuple:
         """
-        Vérifie que le MCEE est démarré en testant l'existence de ses queues.
-        Retourne True si le MCEE est prêt, False sinon.
+        Vérifie que le MCEE est démarré ET consomme activement.
+        Retourne (queue_exists, consumer_count, message_count)
         """
         try:
-            # Vérifier que la queue speech du MCEE existe (passive=True = juste vérifier)
-            self.channel.queue_declare(queue="mcee_speech_queue", passive=True)
-            self.channel.queue_declare(queue="mcee_emotions_queue", passive=True)
-            return True
+            # queue_declare avec passive=True retourne les infos de la queue
+            result = self.channel.queue_declare(queue="mcee_emotions_queue", passive=True)
+            consumer_count = result.method.consumer_count
+            message_count = result.method.message_count
+            return (True, consumer_count, message_count)
         except Exception:
-            return False
+            return (False, 0, 0)
     
-    def wait_for_mcee(self, timeout: float = 30.0, check_interval: float = 1.0) -> bool:
+    def wait_for_mcee(self, timeout: float = 30.0, check_interval: float = 2.0) -> bool:
         """
-        Attend que le MCEE soit démarré (queues créées).
+        Attend que le MCEE soit démarré ET consomme activement.
         Retourne True si MCEE prêt, False si timeout.
         """
-        print(f"  🔍 Vérification que le MCEE est démarré...")
+        print(f"  🔍 Vérification que le MCEE est démarré et actif...")
         
         start_time = time.time()
         while (time.time() - start_time) < timeout:
-            # Reconnecter si nécessaire (passive declare peut fermer le canal en cas d'erreur)
+            # Reconnecter si nécessaire
             if self.channel.is_closed:
                 self.connect()
             
-            if self.check_mcee_ready():
-                print(f"  ✓ MCEE détecté et prêt !")
-                return True
-            
+            queue_exists, consumers, messages = self.check_mcee_ready()
             remaining = int(timeout - (time.time() - start_time))
-            print(f"  ⏳ MCEE non détecté, attente... ({remaining}s restantes)")
+            
+            if queue_exists and consumers > 0:
+                print(f"  ✓ MCEE actif ! ({consumers} consommateur(s), {messages} msg en attente)")
+                return True
+            elif queue_exists and consumers == 0:
+                print(f"  ⚠ Queue existe mais AUCUN consommateur ! ({remaining}s)")
+                print(f"    → Le MCEE n'est pas lancé ou ne consomme pas")
+            else:
+                print(f"  ⏳ Queue n'existe pas... ({remaining}s)")
+            
             time.sleep(check_interval)
         
-        print(f"  ✗ Timeout: MCEE non détecté après {timeout}s")
-        print(f"    → Lancez le MCEE dans un autre terminal: ./mcee")
+        print(f"\n  ✗ MCEE non actif après {timeout}s")
+        print("  ╔════════════════════════════════════════════════════════╗")
+        print("  ║  ERREUR: Le MCEE ne consomme pas les messages !        ║")
+        print("  ║                                                        ║")
+        print("  ║  Lancez le MCEE dans un autre terminal:                ║")
+        print("  ║    ./mcee                                              ║")
+        print("  ╚════════════════════════════════════════════════════════╝")
         return False
     
     def warmup(self, seconds: float = 2.0):
         """
         Vérifie que le MCEE est prêt avant de commencer les tests.
         """
-        if not self.wait_for_mcee(timeout=10.0):
+        if not self.wait_for_mcee(timeout=15.0):
             raise RuntimeError("MCEE non démarré ! Lancez ./mcee avant les tests.")
     
     def close(self):
