@@ -7,6 +7,7 @@
 
 #include "LLMClient.hpp"
 #include <curl/curl.h>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -162,12 +163,12 @@ bool LLMClient::initialize() {
 
 bool LLMClient::initRabbitMQ() {
     try {
-        channel_ = AmqpClient::Channel::Create(
-            config_.rabbitmq_host,
-            config_.rabbitmq_port,
-            config_.rabbitmq_user,
-            config_.rabbitmq_password
-        );
+        // Construire la chaîne de connexion AMQP
+        std::string amqp_uri = "amqp://" + config_.rabbitmq_user + ":" +
+            config_.rabbitmq_password + "@" + config_.rabbitmq_host + ":" +
+            std::to_string(config_.rabbitmq_port) + "/";
+
+        channel_ = AmqpClient::Channel::Open(amqp_uri);
 
         // Déclarer l'exchange de requêtes
         channel_->DeclareExchange(

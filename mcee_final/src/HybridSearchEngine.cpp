@@ -12,6 +12,7 @@
 #include <sstream>
 #include <iostream>
 #include <functional>
+#include <unordered_set>
 
 namespace mcee {
 
@@ -46,7 +47,7 @@ SearchResponse HybridSearchEngine::search(
         conscience_state = conscience_->getCurrentState();
     }
     response.Ft = conscience_state.sentiment;
-    response.Ct = conscience_state.consciousness;
+    response.Ct = conscience_state.consciousness_level;
 
     // Extraire les lemmes significatifs
     auto lemmas = extractSignificantLemmas(tokens);
@@ -572,7 +573,7 @@ LLMContext HybridSearchEngine::buildContext(
     if (conscience_) {
         auto state = conscience_->getCurrentState();
         context.Ft = state.sentiment;
-        context.Ct = state.consciousness;
+        context.Ct = state.consciousness_level;
         context.sentiment_label = state.sentiment > 0.2 ? "positif" :
                                   (state.sentiment < -0.2 ? "négatif" : "neutre");
     }
