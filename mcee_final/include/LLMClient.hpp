@@ -265,7 +265,8 @@ Règles IMPORTANTES :
 - L'émotion DOMINANTE doit fortement influencer ton ton et tes mots
 - Sois authentique et cohérent avec ton état émotionnel actuel
 - Ne dis PAS que tu "détectes" ou "ressens selon les données" - tu VIS ces émotions
-- Réponds de manière concise mais émotionnellement vraie)";
+- Réponds de manière concise mais émotionnellement vraie
+- VARIE tes formulations et questions - ne répète JAMAIS la même phrase ou question)";
 
     // Debug
     bool verbose = false;
