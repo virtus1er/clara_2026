@@ -1387,6 +1387,12 @@ std::string MCEEEngine::generateEmotionalResponse(
         return "";
     }
 
+    // Attendre que les émotions arrivent via RabbitMQ (500ms)
+    if (!quiet_mode_) {
+        std::cout << "[MCEEEngine] Attente des émotions (500ms)...\n";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
     // 1. TOUJOURS construire le contexte depuis les émotions en temps réel
     LLMContext context;
 
@@ -1427,15 +1433,20 @@ std::string MCEEEngine::generateEmotionalResponse(
         }
     }
 
-    if (!quiet_mode_) {
-        std::cout << "[MCEEEngine] État émotionnel temps réel: Ft=" << std::fixed << std::setprecision(2)
-                  << context.Ft << " Ct=" << context.Ct;
-        if (!context.dominant_emotion.empty()) {
-            std::cout << " dominant=" << context.dominant_emotion
-                      << "(" << static_cast<int>(context.dominant_score * 100) << "%)";
+    // Log des émotions envoyées au LLM
+    std::cout << "[MCEEEngine] Émotions envoyées au LLM: ";
+    if (context.emotions.empty()) {
+        std::cout << "(aucune émotion >= 0.40)\n";
+    } else {
+        for (size_t i = 0; i < context.emotions.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << context.emotions[i].name << "="
+                      << static_cast<int>(context.emotions[i].score * 100) << "%";
         }
         std::cout << "\n";
     }
+    std::cout << "[MCEEEngine] Ft=" << std::fixed << std::setprecision(2)
+              << context.Ft << " Ct=" << context.Ct << "\n";
 
     // 2. Enrichir avec la recherche mémoire (si disponible et si lemmas fournis)
     bool memory_found = false;
