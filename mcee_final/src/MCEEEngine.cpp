@@ -1458,6 +1458,20 @@ std::string MCEEEngine::generateEmotionalResponse(
     std::cout << "[MCEEEngine] Ft=" << std::fixed << std::setprecision(2)
               << context.Ft << " Ct=" << context.Ct << "\n";
 
+    // 1b. Ajouter le contexte décisionnel (ADDOEngine)
+    if (addo_engine_) {
+        auto goal_state = addo_engine_->getCurrentState();
+        context.goal_G = goal_state.G;
+        context.dominant_goal = goal_state.dominant_variable;
+        context.resilience = goal_state.resilience;
+
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] G(t)=" << std::fixed << std::setprecision(2)
+                      << context.goal_G << " (" << context.dominant_goal
+                      << ") Rs=" << context.resilience << "\n";
+        }
+    }
+
     // 2. Enrichir avec la recherche mémoire (si disponible et si lemmas fournis)
     bool memory_found = false;
     if (hybrid_search_ && !lemmas.empty()) {

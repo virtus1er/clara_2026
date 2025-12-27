@@ -396,6 +396,34 @@ std::string LLMClient::buildUserPrompt(const std::string& question, const LLMCon
         oss << "\n";
     }
 
+    // Contexte décisionnel (objectifs et motivation)
+    if (context.goal_G > 0.0 || !context.dominant_goal.empty()) {
+        oss << "\nÉtat motivationnel:\n";
+        oss << "- Niveau d'objectif G(t): " << std::fixed << std::setprecision(2)
+            << context.goal_G << " (";
+        if (context.goal_G >= 0.7) oss << "très motivé";
+        else if (context.goal_G >= 0.4) oss << "motivé";
+        else oss << "en réflexion";
+        oss << ")\n";
+
+        if (!context.dominant_goal.empty()) {
+            oss << "- Focus principal: " << context.dominant_goal << "\n";
+        }
+
+        oss << "- Résilience Rs(t): " << std::fixed << std::setprecision(2)
+            << context.resilience << "\n";
+
+        // Conflits d'objectifs
+        if (!context.goal_conflicts.empty()) {
+            oss << "- Tensions internes: ";
+            for (size_t i = 0; i < std::min(context.goal_conflicts.size(), size_t(2)); ++i) {
+                if (i > 0) oss << ", ";
+                oss << context.goal_conflicts[i];
+            }
+            oss << "\n";
+        }
+    }
+
     oss << "\nQuestion de l'utilisateur: " << question;
 
     return oss.str();
