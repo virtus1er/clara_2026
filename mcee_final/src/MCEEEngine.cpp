@@ -1569,11 +1569,6 @@ std::string MCEEEngine::generateConversationSummary() {
 }
 
 bool MCEEEngine::saveConversationToMemory() {
-    if (!memory_manager_) {
-        std::cerr << "[MCEEEngine] MemoryManager non disponible\n";
-        return false;
-    }
-
     auto history = getConversationHistory();
     if (history.size() < 2) {
         std::cout << "[MCEEEngine] Pas assez de messages à sauvegarder\n";
@@ -1589,29 +1584,28 @@ bool MCEEEngine::saveConversationToMemory() {
         return false;
     }
 
-    // Créer un souvenir avec le résumé
-    Memory memory;
-    memory.type = MemoryType::EPISODIC;
-    memory.timestamp = std::chrono::steady_clock::now();
-    memory.activation = 1.0;
-    memory.emotional_weight = 0.7;
-
-    // Copier l'état émotionnel actuel
+    // Créer un souvenir avec le résumé via MemoryManager
+    Phase current_phase = phase_detector_.getCurrentPhase();
+    EmotionalState state_copy;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
-        memory.emotions = current_state_.emotions;
+        state_copy = current_state_;
     }
 
-    // Sauvegarder via MemoryManager
-    std::string memory_id = memory_manager_->storeMemory(memory, summary);
+    // Enregistrer le souvenir avec le résumé comme contexte
+    Memory memory = memory_manager_.recordMemory(state_copy, current_phase, "Conversation: " + summary);
 
-    if (!memory_id.empty()) {
-        std::cout << "[MCEEEngine] Conversation sauvegardée: " << memory_id << "\n";
-        std::cout << "[MCEEEngine] Résumé: " << summary.substr(0, 100) << "...\n";
-        return true;
+    // Synchroniser vers Neo4j si disponible
+    if (memory_manager_.isNeo4jConnected()) {
+        size_t synced = memory_manager_.syncToNeo4j();
+        if (synced > 0) {
+            std::cout << "[MCEEEngine] " << synced << " souvenir(s) synchronisé(s) vers Neo4j\n";
+        }
     }
 
-    return false;
+    std::cout << "[MCEEEngine] Conversation sauvegardée: " << memory.name << "\n";
+    std::cout << "[MCEEEngine] Résumé: " << summary.substr(0, 100) << "...\n";
+    return true;
 }
 
 void MCEEEngine::generateEmergencyLLMResponse(const EmergencyResponse& emergency) {
