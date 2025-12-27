@@ -330,11 +330,15 @@ int main(int argc, char* argv[]) {
 
             std::cout << "[Main] MCEE actif - les émotions RabbitMQ arrivent en temps réel" << std::endl;
 
-            // Initialiser Neo4j en arrière-plan
-            std::cout << "[Main] Initialisation Neo4j..." << std::endl << std::flush;
-            engine.loadConfig(config_file, false);
+            // Initialiser Neo4j en arrière-plan (ne bloque pas)
+            std::thread neo4j_thread([&engine, &config_file]() {
+                std::cout << "[Main] Initialisation Neo4j en arrière-plan..." << std::endl << std::flush;
+                engine.loadConfig(config_file, false);
+                std::cout << "[Main] Neo4j prêt." << std::endl;
+            });
+            neo4j_thread.detach();
 
-            // Lancer le test LLM interactif
+            // Lancer le test LLM interactif immédiatement
             runLLMTest(engine);
 
             engine.stop();
