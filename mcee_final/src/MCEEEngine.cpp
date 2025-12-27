@@ -128,14 +128,17 @@ void MCEEEngine::initMemorySystem() {
 
     // Configurer les callbacks du ConscienceEngine
     conscience_engine_->setUpdateCallback([this](const ConscienceSentimentState& state) {
+        if (quiet_mode_) return;
         std::cout << "[Conscience] Ct=" << std::fixed << std::setprecision(2)
                   << state.consciousness_level << " Ft=" << state.sentiment
                   << " (" << state.dominant_state << ")\n";
     });
 
     conscience_engine_->setTraumaAlertCallback([this](const TraumaState& trauma) {
-        std::cout << "[Conscience] ⚠ Trauma actif: " << trauma.source
-                  << " (intensité=" << trauma.intensity << ")\n";
+        if (!quiet_mode_) {
+            std::cout << "[Conscience] ⚠ Trauma actif: " << trauma.source
+                      << " (intensité=" << trauma.intensity << ")\n";
+        }
         // Relier au système Amyghaleon si nécessaire
         if (trauma.intensity >= 0.8) {
             Phase current_phase = phase_detector_.getCurrentPhase();
