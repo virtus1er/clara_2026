@@ -1387,10 +1387,29 @@ std::string MCEEEngine::generateEmotionalResponse(
         return "";
     }
 
-    // Attendre brièvement les émotions RabbitMQ (200ms)
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    // Attendre que les émotions arrivent (max 1 seconde, polling 100ms)
+    const int max_wait_ms = 1000;
+    const int poll_interval_ms = 100;
+    int waited = 0;
 
-    // 1. TOUJOURS construire le contexte depuis les émotions en temps réel
+    while (waited < max_wait_ms) {
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            // Vérifier si au moins une émotion > 0
+            bool has_emotions = false;
+            for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+                if (current_state_.emotions[i] > 0.01) {
+                    has_emotions = true;
+                    break;
+                }
+            }
+            if (has_emotions) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
+        waited += poll_interval_ms;
+    }
+
+    // 1. Construire le contexte depuis les émotions en temps réel
     LLMContext context;
 
     // Récupérer l'état de conscience actuel (Ft, Ct)
