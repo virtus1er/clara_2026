@@ -713,7 +713,12 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
         previous_state_.E_global,
         current_state_.variance_global
     );
-    
+
+    // 12b. METTRE À JOUR LE CONSCIENCE ENGINE (Ft, Ct)
+    if (conscience_engine_) {
+        conscience_engine_->updateSimple(current_state_);
+    }
+
     // 13. REPOUSSER L'ÉTAT TRAITÉ DANS LA MCT (feedback loop)
     if (mct_) {
         if (!last_speech_analysis_.raw_text.empty()) {
