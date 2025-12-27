@@ -46,14 +46,18 @@ double EmotionUpdater::updateEmotion(
     // Formule MCEE modifiée:
     // E_i(t+1) = E_i(t) + α·Fb_ext + β·Fb_int - γ·Δt·E_i(t) + δ·IS + θ·Wt
     //
-    // La décroissance est maintenant PROPORTIONNELLE à E_current:
-    // - Empêche la décroissance vers 0 quand E ≈ 0
-    // - Plus réaliste physiquement (relaxation exponentielle)
+    // Notes:
+    // - La décroissance est PROPORTIONNELLE à E_current (relaxation exponentielle)
+    // - Le lissage temporel principal est fait en amont (blending 70/30)
+    // - Ici on applique seulement les modulations (feedback, mémoires, sagesse)
+    // - La décroissance est limitée à 5% max par cycle pour préserver les nuances
+
+    double decay = std::min(gamma_ * delta_t, 0.05) * E_current;
 
     double E_next = E_current
                   + alpha_ * fb_ext
                   + beta_ * fb_int
-                  - gamma_ * delta_t * E_current  // Décroissance proportionnelle
+                  - decay
                   + delta_ * influence_memories
                   + theta_ * wisdom;
 

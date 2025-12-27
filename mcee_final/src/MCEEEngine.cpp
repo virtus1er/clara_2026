@@ -582,10 +582,19 @@ void MCEEEngine::processEmotions(const std::unordered_map<std::string, double>& 
     // Sauvegarder l'état précédent
     previous_state_ = current_state_;
 
-    // Convertir en EmotionalState
-    current_state_ = rawToState(raw_emotions);
+    // Convertir en EmotionalState (valeurs brutes du détecteur)
+    EmotionalState raw_state = rawToState(raw_emotions);
 
-    // Exécuter le pipeline complet
+    // Blending: 70% émotions brutes + 30% état précédent (lissage temporel)
+    // Cela préserve les nuances tout en évitant les sauts trop brusques
+    for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+        current_state_.emotions[i] = 0.7 * raw_state.emotions[i]
+                                   + 0.3 * previous_state_.emotions[i];
+    }
+    current_state_.E_global = raw_state.E_global;
+    current_state_.timestamp = raw_state.timestamp;
+
+    // Exécuter le pipeline complet (pattern matching, mémoires, etc.)
     processPipeline(raw_emotions);
 }
 
