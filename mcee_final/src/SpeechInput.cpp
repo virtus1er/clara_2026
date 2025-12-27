@@ -174,13 +174,15 @@ SpeechAnalysis SpeechInput::processText(const TextInput& input) {
         on_urgency_(analysis.raw_text, analysis.urgency_score);
     }
 
-    // Log
-    std::cout << "[SpeechInput] Texte traité:\n"
-              << "  Texte: \"" << (input.text.length() > 50 ? input.text.substr(0, 50) + "..." : input.text) << "\"\n"
-              << "  Sentiment: " << std::fixed << std::setprecision(2) << analysis.sentiment_score << "\n"
-              << "  Arousal: " << analysis.arousal_score << "\n"
-              << "  Urgence: " << analysis.urgency_score << "\n"
-              << "  Menace: " << (analysis.contains_threat ? "OUI" : "non") << "\n";
+    // Log (sauf en mode silencieux)
+    if (!quiet_mode_) {
+        std::cout << "[SpeechInput] Texte traité:\n"
+                  << "  Texte: \"" << (input.text.length() > 50 ? input.text.substr(0, 50) + "..." : input.text) << "\"\n"
+                  << "  Sentiment: " << std::fixed << std::setprecision(2) << analysis.sentiment_score << "\n"
+                  << "  Arousal: " << analysis.arousal_score << "\n"
+                  << "  Urgence: " << analysis.urgency_score << "\n"
+                  << "  Menace: " << (analysis.contains_threat ? "OUI" : "non") << "\n";
+    }
 
     return analysis;
 }

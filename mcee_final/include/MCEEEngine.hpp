@@ -288,6 +288,7 @@ public:
     void setQuietMode(bool quiet) {
         quiet_mode_ = quiet;
         emotion_updater_.setQuietMode(quiet);
+        speech_input_.setQuietMode(quiet);
     }
     [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
 

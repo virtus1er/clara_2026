@@ -142,6 +142,12 @@ public:
     [[nodiscard]] size_t getProcessedCount() const { return processed_count_; }
     [[nodiscard]] double getAverageSentiment() const { return average_sentiment_; }
 
+    /**
+     * @brief Mode silencieux (moins de logs)
+     */
+    void setQuietMode(bool quiet) { quiet_mode_ = quiet; }
+    [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
+
 private:
     // Dictionnaires de mots
     std::unordered_set<std::string> threat_words_;
@@ -164,6 +170,9 @@ private:
     // Callbacks
     TextCallback on_text_;
     UrgencyCallback on_urgency_;
+
+    // Mode silencieux
+    bool quiet_mode_ = false;
 
     /**
      * @brief Initialise les dictionnaires par défaut

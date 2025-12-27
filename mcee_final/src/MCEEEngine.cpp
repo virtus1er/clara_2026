@@ -575,8 +575,10 @@ void MCEEEngine::handleSpeechMessage(const std::string& body) {
                 current_feedback_.external = current_feedback_.external * 0.3 + fb_ext * 0.7;
             }
 
-            std::cout << "[MCEEEngine] Texte traité, feedback externe ajusté: " 
-                      << std::fixed << std::setprecision(2) << current_feedback_.external << "\n";
+            if (!quiet_mode_) {
+                std::cout << "[MCEEEngine] Texte traité, feedback externe ajusté: "
+                          << std::fixed << std::setprecision(2) << current_feedback_.external << "\n";
+            }
         }
 
     } catch (const std::exception& e) {
@@ -616,9 +618,11 @@ void MCEEEngine::processSpeechText(const std::string& text, const std::string& s
         memory_manager_.recordMemory(current_state_, phase_detector_.getCurrentPhase(), context);
     }
 
-    std::cout << "[MCEEEngine] Texte traité: sentiment=" 
-              << std::fixed << std::setprecision(2) << last_speech_analysis_.sentiment_score
-              << ", fb_ext=" << current_feedback_.external << "\n";
+    if (!quiet_mode_) {
+        std::cout << "[MCEEEngine] Texte traité: sentiment="
+                  << std::fixed << std::setprecision(2) << last_speech_analysis_.sentiment_score
+                  << ", fb_ext=" << current_feedback_.external << "\n";
+    }
 }
 
 void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& raw_emotions) {
@@ -1416,13 +1420,15 @@ std::string MCEEEngine::generateEmotionalResponse(
         }
     }
 
-    std::cout << "[MCEEEngine] État émotionnel temps réel: Ft=" << std::fixed << std::setprecision(2)
-              << context.Ft << " Ct=" << context.Ct;
-    if (!context.dominant_emotion.empty()) {
-        std::cout << " dominant=" << context.dominant_emotion
-                  << "(" << static_cast<int>(context.dominant_score * 100) << "%)";
+    if (!quiet_mode_) {
+        std::cout << "[MCEEEngine] État émotionnel temps réel: Ft=" << std::fixed << std::setprecision(2)
+                  << context.Ft << " Ct=" << context.Ct;
+        if (!context.dominant_emotion.empty()) {
+            std::cout << " dominant=" << context.dominant_emotion
+                      << "(" << static_cast<int>(context.dominant_score * 100) << "%)";
+        }
+        std::cout << "\n";
     }
-    std::cout << "\n";
 
     // 2. Enrichir avec la recherche mémoire (si disponible et si lemmas fournis)
     bool memory_found = false;
@@ -1458,13 +1464,15 @@ std::string MCEEEngine::generateEmotionalResponse(
 
             context.search_confidence = search_result.overall_confidence;
 
-            std::cout << "[MCEEEngine] Mémoire enrichie: "
-                      << search_result.results.size() << " souvenirs, "
-                      << "confiance=" << search_result.overall_confidence << "\n";
+            if (!quiet_mode_) {
+                std::cout << "[MCEEEngine] Mémoire enrichie: "
+                          << search_result.results.size() << " souvenirs, "
+                          << "confiance=" << search_result.overall_confidence << "\n";
+            }
         }
     }
 
-    if (!memory_found) {
+    if (!memory_found && !quiet_mode_) {
         std::cout << "[MCEEEngine] Pas de souvenir trouvé - utilisation émotions temps réel uniquement\n";
     }
 
@@ -1484,9 +1492,11 @@ std::string MCEEEngine::generateEmotionalResponse(
     auto response = llm_client_->generate(request);
 
     if (response.success) {
-        std::cout << "[MCEEEngine] Réponse LLM générée: "
-                  << response.tokens_total << " tokens, "
-                  << response.generation_time_ms << "ms\n";
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] Réponse LLM générée: "
+                      << response.tokens_total << " tokens, "
+                      << response.generation_time_ms << "ms\n";
+        }
         return response.content;
     } else {
         std::cerr << "[MCEEEngine] Erreur LLM: " << response.error_message << "\n";
