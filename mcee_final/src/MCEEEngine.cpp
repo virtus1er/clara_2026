@@ -1402,19 +1402,17 @@ std::string MCEEEngine::generateEmotionalResponse(
                                   (state.sentiment < -0.2 ? "négatif" : "neutre");
     }
 
-    // Construire le contexte depuis l'état émotionnel actuel (émotions temps réel)
+    // Construire le contexte depuis l'état émotionnel actuel (TOUTES les émotions)
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
 
-        // Extraire les émotions significatives (entre 0.4 et 1.0)
+        // Envoyer TOUTES les 24 émotions au LLM
         for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
-            if (current_state_.emotions[i] >= 0.4 && current_state_.emotions[i] <= 1.0) {
-                EmotionScore es;
-                es.name = EMOTION_NAMES[i];
-                es.score = current_state_.emotions[i];
-                es.trigger = "temps_réel";
-                context.emotions.push_back(es);
-            }
+            EmotionScore es;
+            es.name = EMOTION_NAMES[i];
+            es.score = current_state_.emotions[i];
+            es.trigger = "temps_réel";
+            context.emotions.push_back(es);
         }
 
         // Trier par score décroissant
@@ -1423,25 +1421,21 @@ std::string MCEEEngine::generateEmotionalResponse(
                 return a.score > b.score;
             });
 
-        // Dominante
-        if (!context.emotions.empty()) {
+        // Dominante (première après tri)
+        if (!context.emotions.empty() && context.emotions[0].score > 0.0) {
             context.dominant_emotion = context.emotions[0].name;
             context.dominant_score = context.emotions[0].score;
         }
     }
 
-    // Log des émotions envoyées au LLM
-    std::cout << "[MCEEEngine] Émotions envoyées au LLM: ";
-    if (context.emotions.empty()) {
-        std::cout << "(aucune émotion >= 0.40)\n";
-    } else {
-        for (size_t i = 0; i < context.emotions.size(); ++i) {
-            if (i > 0) std::cout << ", ";
-            std::cout << context.emotions[i].name << "="
-                      << static_cast<int>(context.emotions[i].score * 100) << "%";
-        }
-        std::cout << "\n";
+    // Log des 5 émotions principales envoyées au LLM
+    std::cout << "[MCEEEngine] Top émotions: ";
+    for (size_t i = 0; i < std::min(size_t(5), context.emotions.size()); ++i) {
+        if (i > 0) std::cout << ", ";
+        std::cout << context.emotions[i].name << "="
+                  << static_cast<int>(context.emotions[i].score * 100) << "%";
     }
+    std::cout << " (24 émotions envoyées)\n";
     std::cout << "[MCEEEngine] Ft=" << std::fixed << std::setprecision(2)
               << context.Ft << " Ct=" << context.Ct << "\n";
 
