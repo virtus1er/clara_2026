@@ -387,6 +387,8 @@ private:
     // Timestamps
     std::chrono::steady_clock::time_point last_update_time_;
     std::chrono::steady_clock::time_point pattern_start_time_;
+    std::chrono::steady_clock::time_point last_emergency_llm_time_;  // Cooldown pour LLM d'urgence
+    static constexpr double EMERGENCY_LLM_COOLDOWN_SECONDS = 30.0;   // 30 secondes entre réponses
 
     /**
      * @brief Initialise la connexion RabbitMQ

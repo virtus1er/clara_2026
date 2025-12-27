@@ -1512,6 +1512,21 @@ std::string MCEEEngine::generateEmotionalResponse(
 }
 
 void MCEEEngine::generateEmergencyLLMResponse(const EmergencyResponse& emergency) {
+    // Vérifier le cooldown pour éviter les réponses en boucle
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - last_emergency_llm_time_).count();
+
+    if (elapsed < EMERGENCY_LLM_COOLDOWN_SECONDS) {
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] Urgence Amyghaleon ignorée (cooldown: "
+                      << static_cast<int>(EMERGENCY_LLM_COOLDOWN_SECONDS - elapsed) << "s restantes)\n";
+        }
+        return;
+    }
+
+    // Mettre à jour le timestamp
+    last_emergency_llm_time_ = now;
+
     // Construire le contexte d'urgence pour le LLM
     LLMContext context;
 
