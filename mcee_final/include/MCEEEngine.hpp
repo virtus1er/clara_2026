@@ -289,6 +289,7 @@ public:
         quiet_mode_ = quiet;
         emotion_updater_.setQuietMode(quiet);
         speech_input_.setQuietMode(quiet);
+        amyghaleon_.setQuietMode(quiet);
     }
     [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
 
@@ -485,6 +486,11 @@ private:
      * @brief Exécute une action d'urgence
      */
     void executeEmergencyAction(const EmergencyResponse& response);
+
+    /**
+     * @brief Génère une réponse LLM adaptée à l'urgence Amyghaleon
+     */
+    void generateEmergencyLLMResponse(const EmergencyResponse& emergency);
 
     /**
      * @brief Convertit les émotions brutes en EmotionalState

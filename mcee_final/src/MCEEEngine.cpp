@@ -913,7 +913,9 @@ void MCEEEngine::updateWisdom() {
 }
 
 void MCEEEngine::executeEmergencyAction(const EmergencyResponse& response) {
-    std::cout << "\n[MCEEEngine] ⚡ Exécution action d'urgence: " << response.action << "\n";
+    if (!quiet_mode_) {
+        std::cout << "\n[MCEEEngine] ⚡ Exécution action d'urgence: " << response.action << "\n";
+    }
 
     // Actions spécifiques selon le type
     if (response.action == "FUITE") {
@@ -925,6 +927,11 @@ void MCEEEngine::executeEmergencyAction(const EmergencyResponse& response) {
     } else if (response.action == "ALERTE") {
         // Mode alerte
         current_feedback_.internal = 0.5;
+    }
+
+    // Générer une réponse LLM adaptée à l'urgence si disponible
+    if (llm_client_ && llm_client_->isReady()) {
+        generateEmergencyLLMResponse(response);
     }
 }
 
@@ -1501,6 +1508,58 @@ std::string MCEEEngine::generateEmotionalResponse(
     } else {
         std::cerr << "[MCEEEngine] Erreur LLM: " << response.error_message << "\n";
         return "";
+    }
+}
+
+void MCEEEngine::generateEmergencyLLMResponse(const EmergencyResponse& emergency) {
+    // Construire le contexte d'urgence pour le LLM
+    LLMContext context;
+
+    // Récupérer l'état de conscience actuel
+    if (conscience_engine_) {
+        auto state = conscience_engine_->getCurrentState();
+        context.Ft = state.sentiment;
+        context.Ct = state.consciousness_level;
+        context.sentiment_label = state.sentiment > 0.2 ? "positif" :
+                                  (state.sentiment < -0.2 ? "négatif" : "neutre");
+    }
+
+    // Ajouter l'émotion d'urgence comme dominante
+    EmotionScore urgent_emotion;
+    urgent_emotion.name = emergency.trigger_emotion;
+    urgent_emotion.score = emergency.emotion_value;
+    urgent_emotion.trigger = "urgence_amyghaleon";
+    context.emotions.push_back(urgent_emotion);
+    context.dominant_emotion = emergency.trigger_emotion;
+    context.dominant_score = emergency.emotion_value;
+
+    // Construire une question contextuelle pour l'urgence
+    std::string emergency_prompt;
+    if (emergency.action == "FUITE") {
+        emergency_prompt = "Je ressens une forte peur et j'ai besoin de réconfort. Aide-moi à me calmer.";
+    } else if (emergency.action == "BLOCAGE") {
+        emergency_prompt = "Je suis submergé par l'émotion (" + emergency.trigger_emotion +
+                          "). J'ai besoin d'aide pour traverser ce moment difficile.";
+    } else {
+        emergency_prompt = "Je ressens une émotion intense (" + emergency.trigger_emotion +
+                          " = " + std::to_string(static_cast<int>(emergency.emotion_value * 100)) +
+                          "%). Peux-tu m'aider ?";
+    }
+
+    // Générer la réponse LLM
+    LLMRequest request;
+    request.user_question = emergency_prompt;
+    request.emotional_context = context;
+
+    auto response = llm_client_->generate(request);
+
+    if (response.success) {
+        std::cout << "\n┌─────────────────────────────────────────────────────────────┐\n";
+        std::cout << "│ 🆘 Réponse Amyghaleon (" << emergency.trigger_emotion << "="
+                  << static_cast<int>(emergency.emotion_value * 100) << "%):\n";
+        std::cout << "├─────────────────────────────────────────────────────────────┘\n";
+        std::cout << response.content << "\n";
+        std::cout << "└─────────────────────────────────────────────────────────────\n\n";
     }
 }
 

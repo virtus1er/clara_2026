@@ -19,15 +19,17 @@ Amyghaleon::Amyghaleon() {
 bool Amyghaleon::checkEmergency(
     const EmotionalState& state,
     const std::vector<Memory>& active_memories,
-    double phase_threshold) const 
+    double phase_threshold) const
 {
     // 1. Vérifier les émotions critiques
     auto [max_emotion, max_value] = findMaxCriticalEmotion(state);
-    
+
     if (max_value > phase_threshold) {
-        std::cout << "[Amyghaleon] ⚠ Émotion critique détectée: " 
-                  << max_emotion << " = " << std::fixed << std::setprecision(3) 
-                  << max_value << " > seuil " << phase_threshold << "\n";
+        if (!quiet_mode_) {
+            std::cout << "[Amyghaleon] ⚠ Émotion critique détectée: "
+                      << max_emotion << " = " << std::fixed << std::setprecision(3)
+                      << max_value << " > seuil " << phase_threshold << "\n";
+        }
         return true;
     }
 
@@ -35,9 +37,11 @@ bool Amyghaleon::checkEmergency(
     double trauma_threshold = phase_threshold - 0.2;
     for (const auto& mem : active_memories) {
         if (isTraumaActivated(mem, trauma_threshold)) {
-            std::cout << "[Amyghaleon] ⚠ Trauma activé: " << mem.name 
-                      << " (activation=" << std::fixed << std::setprecision(3) 
-                      << mem.activation << ")\n";
+            if (!quiet_mode_) {
+                std::cout << "[Amyghaleon] ⚠ Trauma activé: " << mem.name
+                          << " (activation=" << std::fixed << std::setprecision(3)
+                          << mem.activation << ")\n";
+            }
             return true;
         }
     }
@@ -46,7 +50,9 @@ bool Amyghaleon::checkEmergency(
     if (max_value > (phase_threshold + 0.2)) {
         for (const auto& mem : active_memories) {
             if (mem.is_trauma && mem.activation > 0.6) {
-                std::cout << "[Amyghaleon] ⚠ Combinaison critique + trauma détectée\n";
+                if (!quiet_mode_) {
+                    std::cout << "[Amyghaleon] ⚠ Combinaison critique + trauma détectée\n";
+                }
                 return true;
             }
         }
@@ -57,7 +63,7 @@ bool Amyghaleon::checkEmergency(
 
 EmergencyResponse Amyghaleon::triggerEmergencyResponse(
     const EmotionalState& state,
-    Phase phase) 
+    Phase phase)
 {
     emergency_count_++;
 
@@ -71,15 +77,18 @@ EmergencyResponse Amyghaleon::triggerEmergencyResponse(
     response.trigger_emotion = max_emotion;
     response.emotion_value = max_value;
 
-    std::cout << "\n[Amyghaleon] ═══════════════════════════════════════\n"
-              << "[Amyghaleon] ⚡ RÉPONSE D'URGENCE DÉCLENCHÉE #" << emergency_count_ << "\n"
-              << "[Amyghaleon] ═══════════════════════════════════════\n"
-              << "[Amyghaleon] Action    : " << response.action << "\n"
-              << "[Amyghaleon] Priorité  : " << response.priority << "\n"
-              << "[Amyghaleon] Phase     : " << phaseToString(phase) << "\n"
-              << "[Amyghaleon] Émotion   : " << max_emotion << " = " 
-              << std::fixed << std::setprecision(3) << max_value << "\n"
-              << "[Amyghaleon] ═══════════════════════════════════════\n\n";
+    // Afficher le banner seulement si pas en mode silencieux
+    if (!quiet_mode_) {
+        std::cout << "\n[Amyghaleon] ═══════════════════════════════════════\n"
+                  << "[Amyghaleon] ⚡ RÉPONSE D'URGENCE DÉCLENCHÉE #" << emergency_count_ << "\n"
+                  << "[Amyghaleon] ═══════════════════════════════════════\n"
+                  << "[Amyghaleon] Action    : " << response.action << "\n"
+                  << "[Amyghaleon] Priorité  : " << response.priority << "\n"
+                  << "[Amyghaleon] Phase     : " << phaseToString(phase) << "\n"
+                  << "[Amyghaleon] Émotion   : " << max_emotion << " = "
+                  << std::fixed << std::setprecision(3) << max_value << "\n"
+                  << "[Amyghaleon] ═══════════════════════════════════════\n\n";
+    }
 
     // Appeler le callback si défini
     if (on_emergency_) {

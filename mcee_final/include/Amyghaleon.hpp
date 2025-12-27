@@ -77,6 +77,12 @@ public:
     void resetEmergencyCount() { emergency_count_ = 0; }
 
     /**
+     * @brief Mode silencieux (moins de logs)
+     */
+    void setQuietMode(bool quiet) { quiet_mode_ = quiet; }
+    [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
+
+    /**
      * @brief Vérifie si un trauma spécifique est activé au-dessus du seuil
      * @param memory Souvenir à vérifier
      * @param threshold Seuil d'activation
@@ -89,6 +95,7 @@ public:
 
 private:
     size_t emergency_count_ = 0;
+    bool quiet_mode_ = false;
     EmergencyCallback on_emergency_;
 
     /**
