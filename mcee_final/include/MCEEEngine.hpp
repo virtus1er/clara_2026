@@ -283,6 +283,21 @@ public:
     [[nodiscard]] bool isLLMReady() const { return llm_client_ && llm_client_->isReady(); }
 
     /**
+     * @brief Retourne l'historique de conversation LLM
+     */
+    [[nodiscard]] std::vector<ChatMessage> getConversationHistory() const {
+        if (llm_client_) return llm_client_->getHistory();
+        return {};
+    }
+
+    /**
+     * @brief Efface l'historique de conversation LLM
+     */
+    void clearConversationHistory() {
+        if (llm_client_) llm_client_->clearHistory();
+    }
+
+    /**
      * @brief Active/désactive le mode silencieux (moins de logs)
      */
     void setQuietMode(bool quiet) {

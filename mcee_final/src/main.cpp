@@ -115,15 +115,45 @@ void runLLMTest(MCEEEngine& engine) {
             continue;
         }
 
+        if (input == "/history") {
+            auto history = engine.getConversationHistory();
+            if (history.empty()) {
+                std::cout << "[Historique] Aucune conversation en mémoire.\n";
+            } else {
+                std::cout << "\n┌─────────────────────────────────────────────────────────────┐\n";
+                std::cout << "│ Historique de conversation (" << history.size() << " messages)\n";
+                std::cout << "├─────────────────────────────────────────────────────────────┘\n";
+                for (const auto& msg : history) {
+                    std::string prefix = (msg.role == "user") ? "👤 Vous: " : "🤖 Clara: ";
+                    // Limiter l'affichage à 80 caractères
+                    std::string content = msg.content;
+                    if (content.length() > 80) {
+                        content = content.substr(0, 77) + "...";
+                    }
+                    std::cout << prefix << content << "\n";
+                }
+                std::cout << "└─────────────────────────────────────────────────────────────\n";
+            }
+            continue;
+        }
+
+        if (input == "/clear") {
+            engine.clearConversationHistory();
+            std::cout << "[Historique] Conversation effacée.\n";
+            continue;
+        }
+
         if (input == "/help") {
             std::cout << "Commandes disponibles:\n";
-            std::cout << "  /state  - Affiche l'état émotionnel actuel\n";
-            std::cout << "  /joy    - Passe en état de joie\n";
-            std::cout << "  /sad    - Passe en état de tristesse\n";
-            std::cout << "  /calm   - Passe en état calme\n";
-            std::cout << "  /quiet  - Active/désactive les logs en arrière-plan\n";
-            std::cout << "  /help   - Affiche cette aide\n";
-            std::cout << "  quit    - Quitte le mode test\n";
+            std::cout << "  /state   - Affiche l'état émotionnel actuel\n";
+            std::cout << "  /history - Affiche l'historique de conversation\n";
+            std::cout << "  /clear   - Efface l'historique de conversation\n";
+            std::cout << "  /joy     - Passe en état de joie\n";
+            std::cout << "  /sad     - Passe en état de tristesse\n";
+            std::cout << "  /calm    - Passe en état calme\n";
+            std::cout << "  /quiet   - Active/désactive les logs en arrière-plan\n";
+            std::cout << "  /help    - Affiche cette aide\n";
+            std::cout << "  quit     - Quitte le mode test\n";
             continue;
         }
 
