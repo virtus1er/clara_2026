@@ -1532,6 +1532,88 @@ std::string MCEEEngine::generateEmotionalResponse(
     }
 }
 
+std::string MCEEEngine::generateConversationSummary() {
+    if (!llm_client_ || !llm_client_->isReady()) {
+        return "";
+    }
+
+    auto history = llm_client_->getHistory();
+    if (history.size() < 2) {
+        return "";  // Pas assez de messages pour résumer
+    }
+
+    // Construire le prompt de résumé
+    std::ostringstream conversation;
+    conversation << "Voici une conversation à résumer:\n\n";
+    for (const auto& msg : history) {
+        if (msg.role == "user") {
+            conversation << "Utilisateur: " << msg.content << "\n";
+        } else {
+            conversation << "Clara: " << msg.content << "\n";
+        }
+    }
+    conversation << "\nRésume cette conversation en 2-3 phrases. "
+                 << "Mentionne les points clés et l'état émotionnel général.";
+
+    // Créer une requête spéciale pour le résumé
+    LLMRequest request;
+    request.user_question = conversation.str();
+    request.temperature = 0.3;  // Moins créatif, plus factuel
+
+    auto response = llm_client_->generate(request);
+
+    if (response.success) {
+        return response.content;
+    }
+    return "";
+}
+
+bool MCEEEngine::saveConversationToMemory() {
+    if (!memory_manager_) {
+        std::cerr << "[MCEEEngine] MemoryManager non disponible\n";
+        return false;
+    }
+
+    auto history = getConversationHistory();
+    if (history.size() < 2) {
+        std::cout << "[MCEEEngine] Pas assez de messages à sauvegarder\n";
+        return false;
+    }
+
+    // Générer le résumé
+    std::cout << "[MCEEEngine] Génération du résumé...\n";
+    std::string summary = generateConversationSummary();
+
+    if (summary.empty()) {
+        std::cerr << "[MCEEEngine] Échec génération résumé\n";
+        return false;
+    }
+
+    // Créer un souvenir avec le résumé
+    Memory memory;
+    memory.type = MemoryType::EPISODIC;
+    memory.timestamp = std::chrono::steady_clock::now();
+    memory.activation = 1.0;
+    memory.emotional_weight = 0.7;
+
+    // Copier l'état émotionnel actuel
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        memory.emotions = current_state_.emotions;
+    }
+
+    // Sauvegarder via MemoryManager
+    std::string memory_id = memory_manager_->storeMemory(memory, summary);
+
+    if (!memory_id.empty()) {
+        std::cout << "[MCEEEngine] Conversation sauvegardée: " << memory_id << "\n";
+        std::cout << "[MCEEEngine] Résumé: " << summary.substr(0, 100) << "...\n";
+        return true;
+    }
+
+    return false;
+}
+
 void MCEEEngine::generateEmergencyLLMResponse(const EmergencyResponse& emergency) {
     // Vérifier le cooldown pour éviter les réponses en boucle
     auto now = std::chrono::steady_clock::now();

@@ -137,7 +137,22 @@ void runLLMTest(MCEEEngine& engine) {
             continue;
         }
 
+        if (input == "/save") {
+            std::cout << "[Mémoire] Sauvegarde de la conversation...\n";
+            if (engine.saveConversationToMemory()) {
+                std::cout << "[Mémoire] ✓ Conversation sauvegardée dans Neo4j\n";
+            } else {
+                std::cout << "[Mémoire] ✗ Échec de la sauvegarde\n";
+            }
+            continue;
+        }
+
         if (input == "/clear") {
+            auto history = engine.getConversationHistory();
+            if (history.size() >= 4) {
+                std::cout << "[Mémoire] Sauvegarde automatique avant effacement...\n";
+                engine.saveConversationToMemory();
+            }
             engine.clearConversationHistory();
             std::cout << "[Historique] Conversation effacée.\n";
             continue;
@@ -147,7 +162,8 @@ void runLLMTest(MCEEEngine& engine) {
             std::cout << "Commandes disponibles:\n";
             std::cout << "  /state   - Affiche l'état émotionnel actuel\n";
             std::cout << "  /history - Affiche l'historique de conversation\n";
-            std::cout << "  /clear   - Efface l'historique de conversation\n";
+            std::cout << "  /save    - Sauvegarde la conversation dans Neo4j\n";
+            std::cout << "  /clear   - Sauvegarde puis efface l'historique\n";
             std::cout << "  /joy     - Passe en état de joie\n";
             std::cout << "  /sad     - Passe en état de tristesse\n";
             std::cout << "  /calm    - Passe en état calme\n";

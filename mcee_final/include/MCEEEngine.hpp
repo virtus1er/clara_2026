@@ -298,6 +298,18 @@ public:
     }
 
     /**
+     * @brief Génère un résumé de la conversation actuelle via LLM
+     * @return Résumé textuel de la conversation
+     */
+    std::string generateConversationSummary();
+
+    /**
+     * @brief Sauvegarde la conversation actuelle dans Neo4j comme souvenir
+     * @return true si succès
+     */
+    bool saveConversationToMemory();
+
+    /**
      * @brief Active/désactive le mode silencieux (moins de logs)
      */
     void setQuietMode(bool quiet) {
