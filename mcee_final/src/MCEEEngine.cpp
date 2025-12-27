@@ -266,7 +266,8 @@ void MCEEEngine::setupCallbacks() {
     
     // Callback MLT sur événements pattern
     if (mlt_) {
-        mlt_->setEventCallback([](const PatternEvent& event) {
+        mlt_->setEventCallback([this](const PatternEvent& event) {
+            if (quiet_mode_) return;  // Mode silencieux
             std::string type_str;
             switch (event.type) {
                 case PatternEvent::Type::CREATED: type_str = "CREATED"; break;
@@ -519,7 +520,9 @@ void MCEEEngine::handleEmotionMessage(const std::string& body) {
     try {
         json input = json::parse(body);
 
-        std::cout << "[MCEEEngine] Message émotion reçu (" << body.size() << " bytes)\n";
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] Message émotion reçu (" << body.size() << " bytes)\n";
+        }
 
         std::unordered_map<std::string, double> raw_emotions;
         size_t found_count = 0;
@@ -532,7 +535,9 @@ void MCEEEngine::handleEmotionMessage(const std::string& body) {
             }
         }
 
-        std::cout << "[MCEEEngine] Émotions trouvées: " << found_count << "/24\n";
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] Émotions trouvées: " << found_count << "/24\n";
+        }
 
         processEmotions(raw_emotions);
 
@@ -647,8 +652,8 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
     MatchResult previous_match = current_match_;
     current_match_ = match;
     
-    // Log si transition de pattern
-    if (match.is_transition || match.pattern_id != previous_match.pattern_id) {
+    // Log si transition de pattern (sauf en mode silencieux)
+    if (!quiet_mode_ && (match.is_transition || match.pattern_id != previous_match.pattern_id)) {
         std::cout << "[MCEEEngine] Pattern actif: " << match.pattern_name
                   << " (sim=" << std::fixed << std::setprecision(3) << match.similarity
                   << ", conf=" << match.confidence << ")\n";
@@ -754,8 +759,11 @@ void MCEEEngine::processPipeline(const std::unordered_map<std::string, double>& 
 }
 
 void MCEEEngine::printState() const {
+    // En mode silencieux, ne rien afficher
+    if (quiet_mode_) return;
+
     auto [dominant, value] = current_state_.getDominant();
-    
+
     std::cout << "\n[MCEEEngine] État émotionnel mis à jour:\n";
     std::cout << "  Pattern   : " << current_match_.pattern_name 
               << " (sim=" << std::fixed << std::setprecision(2) << current_match_.similarity 
@@ -1301,10 +1309,12 @@ void MCEEEngine::publishSnapshot(const MCTGraphSnapshot& snapshot) {
             false, false
         );
 
-        std::cout << "[MCEEEngine] Snapshot MCTGraph publié: "
-                  << snapshot.stats.total_words << " mots, "
-                  << snapshot.stats.total_emotions << " émotions, "
-                  << snapshot.stats.causal_edges << " liens causaux\n";
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] Snapshot MCTGraph publié: "
+                      << snapshot.stats.total_words << " mots, "
+                      << snapshot.stats.total_emotions << " émotions, "
+                      << snapshot.stats.causal_edges << " liens causaux\n";
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "[MCEEEngine] Erreur publication snapshot: " << e.what() << "\n";

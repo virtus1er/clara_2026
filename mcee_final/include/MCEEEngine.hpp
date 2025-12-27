@@ -283,6 +283,12 @@ public:
     [[nodiscard]] bool isLLMReady() const { return llm_client_ && llm_client_->isReady(); }
 
     /**
+     * @brief Active/désactive le mode silencieux (moins de logs)
+     */
+    void setQuietMode(bool quiet) { quiet_mode_ = quiet; }
+    [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
+
+    /**
      * @brief Récupère l'état de conscience et sentiment actuel
      */
     ConscienceSentimentState getConscienceState() const;
@@ -322,6 +328,7 @@ public:
 private:
     // Configuration
     RabbitMQConfig rabbitmq_config_;
+    bool quiet_mode_ = false;  // Mode silencieux (moins de logs)
 
     // Nouveau système MCT/MLT (v3)
     std::shared_ptr<MCT> mct_;

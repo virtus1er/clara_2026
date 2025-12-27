@@ -54,7 +54,8 @@ void runLLMTest(MCEEEngine& engine) {
 
     std::cout << "[LLM Test] LLMClient prêt. Tapez vos questions (ou 'quit' pour sortir).\n";
     std::cout << "[LLM Test] Les émotions RabbitMQ arrivent en temps réel.\n";
-    std::cout << "[LLM Test] Commandes: /state, /joy, /sad, /calm, /help\n\n";
+    std::cout << "[LLM Test] Tapez /quiet pour désactiver les logs en arrière-plan.\n";
+    std::cout << "[LLM Test] Commandes: /state, /joy, /sad, /calm, /quiet, /help\n\n";
 
     std::string input;
     while (g_running.load()) {
@@ -107,12 +108,20 @@ void runLLMTest(MCEEEngine& engine) {
             continue;
         }
 
+        if (input == "/quiet") {
+            bool current = engine.isQuietMode();
+            engine.setQuietMode(!current);
+            std::cout << "[Mode] Logs " << (engine.isQuietMode() ? "DÉSACTIVÉS" : "ACTIVÉS") << "\n";
+            continue;
+        }
+
         if (input == "/help") {
             std::cout << "Commandes disponibles:\n";
             std::cout << "  /state  - Affiche l'état émotionnel actuel\n";
             std::cout << "  /joy    - Passe en état de joie\n";
             std::cout << "  /sad    - Passe en état de tristesse\n";
             std::cout << "  /calm   - Passe en état calme\n";
+            std::cout << "  /quiet  - Active/désactive les logs en arrière-plan\n";
             std::cout << "  /help   - Affiche cette aide\n";
             std::cout << "  quit    - Quitte le mode test\n";
             continue;
