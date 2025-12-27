@@ -43,15 +43,18 @@ double EmotionUpdater::updateEmotion(
     double fb_int,
     double delta_t,
     double influence_memories,
-    double wisdom) const 
+    double wisdom) const
 {
+    // Limiter delta_t à 1 seconde max pour éviter une décroissance excessive
+    double capped_delta_t = std::min(delta_t, 1.0);
+
     // Formule MCEE:
     // E_i(t+1) = E_i(t) + α·Fb_ext + β·Fb_int - γ·Δt + δ·IS + θ·Wt
-    
+
     double E_next = E_current
                   + alpha_ * fb_ext
                   + beta_ * fb_int
-                  - gamma_ * delta_t
+                  - gamma_ * capped_delta_t
                   + delta_ * influence_memories
                   + theta_ * wisdom;
 
