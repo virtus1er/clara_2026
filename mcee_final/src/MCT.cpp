@@ -36,15 +36,15 @@ bool MCT::push(const EmotionalState& state) {
                 validation_callback_(validation);
             }
 
-            if (config_.log_validation_errors) {
-                std::cerr << "[MCT] Validation warning: " << validation.error_code
-                          << " - " << validation.error_message << " (auto-corrected)\n";
-            }
-
             if (config_.reject_on_validation_failure) {
+                // Seulement loguer si on rejette (erreur non-récupérable)
+                if (config_.log_validation_errors) {
+                    std::cerr << "[MCT] Validation error: " << validation.error_code
+                              << " - " << validation.error_message << "\n";
+                }
                 return false;
             }
-            // Sinon, on sanitize et on continue
+            // Sinon, on sanitize silencieusement et on continue
         }
     }
 
@@ -86,14 +86,15 @@ void MCT::pushWithSpeech(const EmotionalState& state,
                 validation_callback_(validation);
             }
 
-            if (config_.log_validation_errors) {
-                std::cerr << "[MCT] Validation warning: " << validation.error_code
-                          << " - " << validation.error_message << " (auto-corrected)\n";
-            }
-
             if (config_.reject_on_validation_failure) {
+                // Seulement loguer si on rejette (erreur non-récupérable)
+                if (config_.log_validation_errors) {
+                    std::cerr << "[MCT] Validation error: " << validation.error_code
+                              << " - " << validation.error_message << "\n";
+                }
                 return;
             }
+            // Sinon, on sanitize silencieusement et on continue
         }
     }
 
