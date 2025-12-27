@@ -53,16 +53,8 @@ void runLLMTest(MCEEEngine& engine) {
     }
 
     std::cout << "[LLM Test] LLMClient prêt. Tapez vos questions (ou 'quit' pour sortir).\n";
-    std::cout << "[LLM Test] Conseil: Tapez d'abord une phrase émotionnelle pour enrichir le contexte.\n\n";
-
-    // Simuler un état émotionnel initial (neutre/calme)
-    std::unordered_map<std::string, double> initial_state;
-    for (const auto& name : EMOTION_NAMES) {
-        initial_state[name] = 0.1;
-    }
-    initial_state["Calme"] = 0.5;
-    initial_state["Intérêt"] = 0.4;
-    engine.processEmotions(initial_state);
+    std::cout << "[LLM Test] Les émotions RabbitMQ arrivent en temps réel.\n";
+    std::cout << "[LLM Test] Commandes: /state, /joy, /sad, /calm, /help\n\n";
 
     std::string input;
     while (g_running.load()) {
@@ -316,8 +308,24 @@ int main(int argc, char* argv[]) {
             // Mode démonstration
             runDemo(engine);
         } else if (llm_test_mode) {
-            // Mode test LLM interactif
+            // Mode test LLM interactif AVEC consommation RabbitMQ
+            std::cout << "[Main] Démarrage du moteur (RabbitMQ + LLM Test)..." << std::endl << std::flush;
+
+            if (!engine.start()) {
+                std::cerr << "[Main] Échec du démarrage du moteur MCEE" << std::endl;
+                return 1;
+            }
+
+            std::cout << "[Main] MCEE actif - les émotions RabbitMQ arrivent en temps réel" << std::endl;
+
+            // Initialiser Neo4j en arrière-plan
+            std::cout << "[Main] Initialisation Neo4j..." << std::endl << std::flush;
+            engine.loadConfig(config_file, false);
+
+            // Lancer le test LLM interactif
             runLLMTest(engine);
+
+            engine.stop();
         } else {
             // Mode normal avec RabbitMQ
             // IMPORTANT: Démarrer le consumer RabbitMQ EN PREMIER
