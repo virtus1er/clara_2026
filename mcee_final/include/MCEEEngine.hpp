@@ -285,7 +285,10 @@ public:
     /**
      * @brief Active/désactive le mode silencieux (moins de logs)
      */
-    void setQuietMode(bool quiet) { quiet_mode_ = quiet; }
+    void setQuietMode(bool quiet) {
+        quiet_mode_ = quiet;
+        emotion_updater_.setQuietMode(quiet);
+    }
     [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
 
     /**

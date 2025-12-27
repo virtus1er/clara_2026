@@ -27,12 +27,14 @@ void EmotionUpdater::setCoefficientsFromPhase(const PhaseConfig& config) {
     delta_ = config.delta;
     theta_ = config.theta;
 
-    std::cout << "[EmotionUpdater] Coefficients mis à jour:\n"
-              << "  α=" << std::fixed << std::setprecision(2) << alpha_
-              << ", β=" << beta_
-              << ", γ=" << gamma_
-              << ", δ=" << delta_
-              << ", θ=" << theta_ << "\n";
+    if (!quiet_mode_) {
+        std::cout << "[EmotionUpdater] Coefficients mis à jour:\n"
+                  << "  α=" << std::fixed << std::setprecision(2) << alpha_
+                  << ", β=" << beta_
+                  << ", γ=" << gamma_
+                  << ", δ=" << delta_
+                  << ", θ=" << theta_ << "\n";
+    }
 }
 
 double EmotionUpdater::updateEmotion(

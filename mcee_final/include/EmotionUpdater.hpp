@@ -124,6 +124,10 @@ public:
     [[nodiscard]] double getDelta() const { return delta_; }
     [[nodiscard]] double getTheta() const { return theta_; }
 
+    // Mode silencieux
+    void setQuietMode(bool quiet) { quiet_mode_ = quiet; }
+    [[nodiscard]] bool isQuietMode() const { return quiet_mode_; }
+
 private:
     // Coefficients dynamiques selon la phase
     double alpha_;  // Coefficient feedback externe
@@ -131,6 +135,7 @@ private:
     double gamma_;  // Coefficient décroissance
     double delta_;  // Coefficient influence souvenirs
     double theta_;  // Coefficient sagesse
+    bool quiet_mode_ = false;  // Mode silencieux
 };
 
 } // namespace mcee
