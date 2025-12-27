@@ -1387,11 +1387,8 @@ std::string MCEEEngine::generateEmotionalResponse(
         return "";
     }
 
-    // Attendre que les émotions arrivent via RabbitMQ (500ms)
-    if (!quiet_mode_) {
-        std::cout << "[MCEEEngine] Attente des émotions (500ms)...\n";
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Attendre brièvement les émotions RabbitMQ (200ms)
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     // 1. TOUJOURS construire le contexte depuis les émotions en temps réel
     LLMContext context;
