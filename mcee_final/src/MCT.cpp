@@ -37,8 +37,8 @@ bool MCT::push(const EmotionalState& state) {
             }
 
             if (config_.log_validation_errors) {
-                std::cerr << "[MCT] Validation error: " << validation.error_code
-                          << " - " << validation.error_message << "\n";
+                std::cerr << "[MCT] Validation warning: " << validation.error_code
+                          << " - " << validation.error_message << " (auto-corrected)\n";
             }
 
             if (config_.reject_on_validation_failure) {
@@ -77,6 +77,26 @@ void MCT::pushWithSpeech(const EmotionalState& state,
                           double sentiment,
                           double arousal,
                           const std::string& context) {
+    // Validation avant insertion (comme dans push())
+    if (config_.enable_input_validation) {
+        ValidationResult validation = validate(state);
+
+        if (!validation.valid) {
+            if (validation_callback_) {
+                validation_callback_(validation);
+            }
+
+            if (config_.log_validation_errors) {
+                std::cerr << "[MCT] Validation warning: " << validation.error_code
+                          << " - " << validation.error_message << " (auto-corrected)\n";
+            }
+
+            if (config_.reject_on_validation_failure) {
+                return;
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lock(mutex_);
 
     // Sanitize l'état si la validation est active (comme dans push())
