@@ -53,8 +53,8 @@ void runLLMTest(MCEEEngine& engine) {
     }
 
     std::cout << "[LLM Test] LLMClient prêt. Tapez vos questions (ou 'quit' pour sortir).\n";
-    std::cout << "[LLM Test] Les émotions RabbitMQ arrivent en temps réel.\n";
-    std::cout << "[LLM Test] Tapez /quiet pour désactiver les logs en arrière-plan.\n";
+    std::cout << "[LLM Test] Les émotions RabbitMQ arrivent en temps réel (logs masqués).\n";
+    std::cout << "[LLM Test] Tapez /quiet pour réactiver les logs si besoin.\n";
     std::cout << "[LLM Test] Commandes: /state, /joy, /sad, /calm, /quiet, /help\n\n";
 
     std::string input;
@@ -324,6 +324,9 @@ int main(int argc, char* argv[]) {
                 std::cerr << "[Main] Échec du démarrage du moteur MCEE" << std::endl;
                 return 1;
             }
+
+            // Activer le mode silencieux par défaut en mode test LLM
+            engine.setQuietMode(true);
 
             std::cout << "[Main] MCEE actif - les émotions RabbitMQ arrivent en temps réel" << std::endl;
 
