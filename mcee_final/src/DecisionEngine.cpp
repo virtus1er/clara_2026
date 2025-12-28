@@ -539,10 +539,26 @@ ActionProjection DecisionEngine::projectAction(
 {
     ActionProjection proj;
 
-    // Calculer l'incertitude de base
-    proj.uncertainty = 0.5;  // Base
+    // ═══════════════════════════════════════════════════════════════════════
+    // Si l'action a déjà des projections définies, les utiliser comme base
+    // ═══════════════════════════════════════════════════════════════════════
+    bool has_existing_projection = (action.projection.emotional_forecast != 0.0 ||
+                                    action.projection.goal_alignment != 0.0 ||
+                                    action.projection.risk != 0.0);
 
-    // Ajuster selon les épisodes similaires
+    if (has_existing_projection) {
+        proj = action.projection;  // Utiliser les projections existantes
+    } else {
+        // Valeurs par défaut
+        proj.uncertainty = 0.5;
+        proj.emotional_forecast = 0.0;
+        proj.goal_alignment = 0.5;
+        proj.risk = 0.3;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Ajuster selon les épisodes similaires (apprentissage)
+    // ═══════════════════════════════════════════════════════════════════════
     for (const auto& episode : memory.episodes) {
         if (episode.action_taken == action.name) {
             proj.uncertainty *= (1.0 - episode.similarity * 0.3);
@@ -553,26 +569,59 @@ ActionProjection DecisionEngine::projectAction(
     // Profondeur de simulation
     proj.simulation_depth = computeSimulationDepth(proj.uncertainty);
 
-    // Prédiction émotionnelle
-    // Positive si action constructive, négative si risquée
-    if (action.category == "constructif" || action.category == "calme") {
-        proj.emotional_forecast = 0.3;
-    } else if (action.category == "agressif" || action.category == "risque") {
-        proj.emotional_forecast = -0.2;
-    } else {
-        proj.emotional_forecast = 0.0;
+    // ═══════════════════════════════════════════════════════════════════════
+    // Prédiction émotionnelle selon la catégorie
+    // ═══════════════════════════════════════════════════════════════════════
+    if (!has_existing_projection) {
+        const std::string& cat = action.category;
+
+        // Catégories positives/constructives
+        if (cat == "constructif" || cat == "calme" || cat == "soutenir" ||
+            cat == "exprimer" || cat == "collaborer" || cat == "celebrer") {
+            proj.emotional_forecast = 0.3 + 0.1 * frame.Ft;  // Bonus si Ft positif
+            proj.risk = 0.2;
+        }
+        // Catégories neutres/d'attente
+        else if (cat == "attendre" || cat == "observer" || cat == "questionner") {
+            proj.emotional_forecast = 0.1;
+            proj.risk = 0.15;
+        }
+        // Catégories d'action directe
+        else if (cat == "agir" || cat == "proteger" || cat == "rassurer" ||
+                 cat == "reconforter") {
+            proj.emotional_forecast = 0.2;
+            proj.risk = 0.25;
+        }
+        // Catégories risquées
+        else if (cat == "agressif" || cat == "risque") {
+            proj.emotional_forecast = -0.2;
+            proj.risk = 0.6;
+        }
+        // Méta-actions
+        else if (cat == "meta") {
+            proj.emotional_forecast = 0.05;
+            proj.risk = 0.1;
+        }
     }
 
-    // Alignement avec objectifs
-    proj.goal_alignment = goals.G * 0.5 + 0.25;  // Simplifié
+    // ═══════════════════════════════════════════════════════════════════════
+    // Alignement avec objectifs (modulé par G(t))
+    // ═══════════════════════════════════════════════════════════════════════
+    if (!has_existing_projection) {
+        // Base alignment + bonus selon l'action
+        double base_align = goals.G * 0.4 + 0.3;
+        const std::string& cat = action.category;
 
-    // Risque
-    if (action.category == "agressif" || action.category == "risque") {
-        proj.risk = 0.6;
-    } else if (action.category == "meta") {
-        proj.risk = 0.1;
-    } else {
-        proj.risk = 0.3;
+        // Bonus d'alignement selon la catégorie et le contexte
+        if (frame.Ft > 0.2 && (cat == "agir" || cat == "exprimer" || cat == "celebrer")) {
+            base_align += 0.15;  // Actions expressives si positif
+        } else if (frame.Ft < -0.2 && (cat == "soutenir" || cat == "reconforter" || cat == "rassurer")) {
+            base_align += 0.2;  // Actions de soutien si négatif
+        } else if (cat == "attendre" || cat == "observer") {
+            base_align += 0.05;  // Faible bonus pour l'attente
+        }
+
+        proj.goal_alignment = std::clamp(base_align, 0.0, 1.0);
     }
 
     return proj;

@@ -1408,8 +1408,10 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
     ecouter.name = "Ecouter";
     ecouter.description = "Ecouter attentivement et montrer de l'empathie";
     ecouter.category = "attendre";
-    ecouter.projection.emotional_forecast = 0.3;
-    ecouter.projection.goal_alignment = 0.5;
+    ecouter.projection.emotional_forecast = 0.15;
+    ecouter.projection.goal_alignment = 0.4;
+    ecouter.projection.uncertainty = 0.2;  // Très sûr
+    ecouter.projection.risk = 0.1;         // Faible risque
     actions.push_back(ecouter);
 
     ActionOption questionner;
@@ -1417,48 +1419,58 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
     questionner.name = "Questionner";
     questionner.description = "Poser des questions pour mieux comprendre";
     questionner.category = "agir";
-    questionner.projection.emotional_forecast = 0.2;
-    questionner.projection.goal_alignment = 0.4;
+    questionner.projection.emotional_forecast = 0.25;
+    questionner.projection.goal_alignment = 0.5;
+    questionner.projection.uncertainty = 0.3;
+    questionner.projection.risk = 0.15;
     actions.push_back(questionner);
 
     // Actions basées sur le sentiment
     if (Ft > 0.2) {
-        // Sentiment positif
+        // Sentiment positif → actions expressives avec haute confiance
         ActionOption partager;
         partager.id = "CONV_PARTAGER";
         partager.name = "Partager";
         partager.description = "Partager sa joie et son enthousiasme";
-        partager.category = "agir";
+        partager.category = "exprimer";
         partager.projection.emotional_forecast = 0.7;
-        partager.projection.goal_alignment = 0.6;
+        partager.projection.goal_alignment = 0.65;
+        partager.projection.uncertainty = 0.25;
+        partager.projection.risk = 0.15;
         actions.push_back(partager);
 
         ActionOption encourager;
         encourager.id = "CONV_ENCOURAGER";
         encourager.name = "Encourager";
         encourager.description = "Encourager et soutenir";
-        encourager.category = "agir";
+        encourager.category = "soutenir";
         encourager.projection.emotional_forecast = 0.6;
-        encourager.projection.goal_alignment = 0.7;
+        encourager.projection.goal_alignment = 0.75;
+        encourager.projection.uncertainty = 0.2;
+        encourager.projection.risk = 0.1;
         actions.push_back(encourager);
     } else if (Ft < -0.2) {
-        // Sentiment négatif
+        // Sentiment négatif → actions de réconfort avec alignement objectif élevé
         ActionOption reconforter;
         reconforter.id = "CONV_RECONFORTER";
         reconforter.name = "Reconforter";
         reconforter.description = "Apporter du réconfort et de la compassion";
-        reconforter.category = "agir";
+        reconforter.category = "soutenir";
         reconforter.projection.emotional_forecast = 0.5;
-        reconforter.projection.goal_alignment = 0.8;
+        reconforter.projection.goal_alignment = 0.85;
+        reconforter.projection.uncertainty = 0.3;
+        reconforter.projection.risk = 0.1;
         actions.push_back(reconforter);
 
         ActionOption rassurer;
         rassurer.id = "CONV_RASSURER";
         rassurer.name = "Rassurer";
         rassurer.description = "Rassurer et apaiser les inquietudes";
-        rassurer.category = "agir";
-        rassurer.projection.emotional_forecast = 0.4;
-        rassurer.projection.goal_alignment = 0.7;
+        rassurer.category = "proteger";
+        rassurer.projection.emotional_forecast = 0.45;
+        rassurer.projection.goal_alignment = 0.8;
+        rassurer.projection.uncertainty = 0.25;
+        rassurer.projection.risk = 0.1;
         actions.push_back(rassurer);
     }
 
@@ -1468,9 +1480,11 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         proteger.id = "CONV_PROTEGER";
         proteger.name = "Proteger";
         proteger.description = "Offrir protection et securite";
-        proteger.category = "agir";
+        proteger.category = "proteger";
         proteger.projection.emotional_forecast = 0.6;
         proteger.projection.goal_alignment = 0.9;
+        proteger.projection.uncertainty = 0.15;  // Action prioritaire, très sûre
+        proteger.projection.risk = 0.05;
         actions.push_back(proteger);
     } else if (dominant == "Curiosite" || dominant == "Interet") {
         ActionOption explorer;
@@ -1478,26 +1492,32 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         explorer.name = "Explorer";
         explorer.description = "Explorer le sujet ensemble";
         explorer.category = "agir";
-        explorer.projection.emotional_forecast = 0.5;
+        explorer.projection.emotional_forecast = 0.55;
         explorer.projection.goal_alignment = 0.6;
+        explorer.projection.uncertainty = 0.35;
+        explorer.projection.risk = 0.2;
         actions.push_back(explorer);
     } else if (dominant == "Joie" || dominant == "Amusement") {
         ActionOption celebrer;
         celebrer.id = "CONV_CELEBRER";
         celebrer.name = "Celebrer";
         celebrer.description = "Celebrer et partager la joie";
-        celebrer.category = "agir";
-        celebrer.projection.emotional_forecast = 0.8;
-        celebrer.projection.goal_alignment = 0.5;
+        celebrer.category = "celebrer";
+        celebrer.projection.emotional_forecast = 0.85;
+        celebrer.projection.goal_alignment = 0.55;
+        celebrer.projection.uncertainty = 0.2;
+        celebrer.projection.risk = 0.15;
         actions.push_back(celebrer);
     } else if (dominant == "Tristesse") {
         ActionOption accompagner;
         accompagner.id = "CONV_ACCOMPAGNER";
         accompagner.name = "Accompagner";
         accompagner.description = "Accompagner dans la tristesse";
-        accompagner.category = "attendre";
-        accompagner.projection.emotional_forecast = 0.4;
-        accompagner.projection.goal_alignment = 0.8;
+        accompagner.category = "soutenir";
+        accompagner.projection.emotional_forecast = 0.45;
+        accompagner.projection.goal_alignment = 0.85;
+        accompagner.projection.uncertainty = 0.25;
+        accompagner.projection.risk = 0.1;
         actions.push_back(accompagner);
     }
 
