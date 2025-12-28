@@ -695,6 +695,7 @@ LLMResponse LLMClient::parseAnthropicResponse(const std::string& json_response) 
 void LLMClient::addToHistory(const ChatMessage& message) {
     std::lock_guard<std::mutex> lock(history_mutex_);
     history_.push_back(message);
+    messages_since_summary_++;
 
     while (history_.size() > history_limit_ * 2) {
         history_.erase(history_.begin());
@@ -704,6 +705,97 @@ void LLMClient::addToHistory(const ChatMessage& message) {
 void LLMClient::clearHistory() {
     std::lock_guard<std::mutex> lock(history_mutex_);
     history_.clear();
+    messages_since_summary_ = 0;
+    conversation_start_ = std::chrono::steady_clock::now();
+    last_summary_time_ = conversation_start_;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RÉSUMÉ DE CONVERSATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool LLMClient::shouldSummarize() const {
+    std::lock_guard<std::mutex> lock(history_mutex_);
+
+    // Vérifier le nombre de messages
+    if (messages_since_summary_ >= summary_message_threshold_) {
+        return true;
+    }
+
+    // Vérifier le temps écoulé
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - last_summary_time_).count();
+    if (elapsed >= summary_interval_seconds_ && history_.size() >= 4) {
+        return true;
+    }
+
+    return false;
+}
+
+std::string LLMClient::summarizeConversation() {
+    if (!ready_.load()) {
+        return "";
+    }
+
+    std::vector<ChatMessage> history_copy;
+    {
+        std::lock_guard<std::mutex> lock(history_mutex_);
+        if (history_.size() < 4) {
+            return "";  // Pas assez de messages à résumer
+        }
+        history_copy = history_;
+    }
+
+    // Construire le prompt de résumé
+    std::string conversation_text;
+    for (const auto& msg : history_copy) {
+        if (msg.role == "user") {
+            conversation_text += "Utilisateur: " + msg.content + "\n";
+        } else if (msg.role == "assistant") {
+            conversation_text += "Clara: " + msg.content + "\n";
+        }
+    }
+
+    std::string summary_prompt = R"(Résume cette conversation en 2-3 phrases courtes.
+Capture les points clés: sujets abordés, émotions exprimées, et le ton général.
+Réponds UNIQUEMENT avec le résumé, sans introduction.
+
+Conversation:
+)" + conversation_text;
+
+    // Construire les messages pour le LLM
+    std::vector<ChatMessage> messages;
+    messages.push_back({"system", "Tu es un assistant qui résume des conversations de manière concise."});
+    messages.push_back({"user", summary_prompt});
+
+    try {
+        auto response = callDirectHTTP(messages, 0.3, 150);
+
+        if (response.success && !response.content.empty()) {
+            std::string summary = response.content;
+
+            // Mettre à jour l'état
+            {
+                std::lock_guard<std::mutex> lock(history_mutex_);
+                last_summary_ = summary;
+                last_summary_time_ = std::chrono::steady_clock::now();
+                messages_since_summary_ = 0;
+            }
+
+            log("Résumé généré: " + summary.substr(0, 50) + "...");
+
+            // Appeler le callback si défini
+            if (on_summary_) {
+                on_summary_(summary);
+            }
+
+            return summary;
+        }
+    } catch (const std::exception& e) {
+        log("Erreur lors de la génération du résumé: " + std::string(e.what()));
+    }
+
+    return "";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

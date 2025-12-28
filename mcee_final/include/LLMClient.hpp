@@ -450,6 +450,43 @@ public:
     void setHistoryLimit(size_t limit) { history_limit_ = limit; }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // RÉSUMÉ DE CONVERSATION
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * @brief Résume la conversation actuelle
+     * @return Résumé généré par le LLM
+     */
+    std::string summarizeConversation();
+
+    /**
+     * @brief Vérifie si un résumé devrait être généré (basé sur le temps/messages)
+     * @return true si un résumé devrait être généré
+     */
+    [[nodiscard]] bool shouldSummarize() const;
+
+    /**
+     * @brief Callback appelé quand un résumé est généré
+     */
+    using SummaryCallback = std::function<void(const std::string& summary)>;
+    void setSummaryCallback(SummaryCallback callback) { on_summary_ = std::move(callback); }
+
+    /**
+     * @brief Configure l'intervalle de résumé (en secondes)
+     */
+    void setSummaryInterval(double seconds) { summary_interval_seconds_ = seconds; }
+
+    /**
+     * @brief Configure le nombre de messages avant résumé
+     */
+    void setSummaryMessageThreshold(size_t count) { summary_message_threshold_ = count; }
+
+    /**
+     * @brief Retourne le dernier résumé généré
+     */
+    [[nodiscard]] const std::string& getLastSummary() const { return last_summary_; }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // MÉTRIQUES ET ÉTAT
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -491,6 +528,15 @@ private:
     std::vector<ChatMessage> history_;
     size_t history_limit_ = 20;
     mutable std::mutex history_mutex_;
+
+    // Résumé de conversation
+    std::chrono::steady_clock::time_point conversation_start_;
+    std::chrono::steady_clock::time_point last_summary_time_;
+    size_t messages_since_summary_ = 0;
+    double summary_interval_seconds_ = 60.0;  // 1 minute par défaut
+    size_t summary_message_threshold_ = 10;   // ou après 10 messages
+    std::string last_summary_;
+    SummaryCallback on_summary_;
 
     // RabbitMQ (si mode RABBITMQ)
     AmqpClient::Channel::ptr_t channel_;

@@ -217,6 +217,28 @@ void MCEEEngine::initMemorySystem() {
     if (!llm_config.api_key.empty()) {
         if (llm_client_->initialize()) {
             std::cout << "[MCEEEngine] LLMClient initialisé (modèle=" << llm_config.model << ")\n";
+
+            // Configurer le callback de résumé pour stocker en mémoire
+            llm_client_->setSummaryCallback([this](const std::string& summary) {
+                // Stocker le résumé en mémoire long terme via MemoryManager
+                Phase current_phase = phase_detector_.getCurrentPhase();
+                EmotionalState state_copy;
+                {
+                    std::lock_guard<std::mutex> lock(state_mutex_);
+                    state_copy = current_state_;
+                }
+                memory_manager_.recordMemory(state_copy, current_phase, "Résumé auto: " + summary);
+                std::cout << "[MCEEEngine] 📝 Résumé auto stocké: " << summary.substr(0, 40) << "...\n";
+
+                // Aussi stocker dans MCT pour mémoire court terme
+                if (mct_) {
+                    mct_->push(state_copy);
+                }
+            });
+
+            // Configurer l'intervalle de résumé (60 secondes ou 10 messages)
+            llm_client_->setSummaryInterval(60.0);
+            llm_client_->setSummaryMessageThreshold(10);
         } else {
             std::cout << "[MCEEEngine] ⚠ LLMClient: échec initialisation\n";
         }
@@ -1475,7 +1497,8 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
     }
 
     // Actions basées sur l'émotion dominante - SCORES TRÈS ÉLEVÉS (gagnantes)
-    if (dominant == "Peur" || dominant == "Anxiete") {
+    // Émotions de PEUR/ANXIÉTÉ → Protection
+    if (dominant == "Peur" || dominant == "Anxiété" || dominant == "Horreur") {
         ActionOption proteger;
         proteger.id = "CONV_PROTEGER";
         proteger.name = "Proteger";
@@ -1486,7 +1509,9 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         proteger.projection.uncertainty = 0.1;
         proteger.projection.risk = 0.02;
         actions.push_back(proteger);
-    } else if (dominant == "Curiosite" || dominant == "Interet") {
+    }
+    // Émotions de CURIOSITÉ → Exploration
+    else if (dominant == "Intérêt" || dominant == "Fascination") {
         ActionOption explorer;
         explorer.id = "CONV_EXPLORER";
         explorer.name = "Explorer";
@@ -1497,7 +1522,9 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         explorer.projection.uncertainty = 0.15;
         explorer.projection.risk = 0.1;
         actions.push_back(explorer);
-    } else if (dominant == "Joie" || dominant == "Amusement") {
+    }
+    // Émotions de JOIE → Célébration
+    else if (dominant == "Joie" || dominant == "Amusement" || dominant == "Triomphe" || dominant == "Satisfaction") {
         ActionOption celebrer;
         celebrer.id = "CONV_CELEBRER";
         celebrer.name = "Celebrer";
@@ -1508,7 +1535,9 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         celebrer.projection.uncertainty = 0.1;
         celebrer.projection.risk = 0.05;
         actions.push_back(celebrer);
-    } else if (dominant == "Tristesse") {
+    }
+    // Émotions de TRISTESSE → Accompagnement
+    else if (dominant == "Tristesse" || dominant == "Nostalgie" || dominant == "Douleur empathique") {
         ActionOption accompagner;
         accompagner.id = "CONV_ACCOMPAGNER";
         accompagner.name = "Accompagner";
@@ -1519,6 +1548,97 @@ std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
         accompagner.projection.uncertainty = 0.15;
         accompagner.projection.risk = 0.05;
         actions.push_back(accompagner);
+    }
+    // Émotions d'ADMIRATION → Honorer
+    else if (dominant == "Admiration" || dominant == "Adoration" || dominant == "Émerveillement") {
+        ActionOption honorer;
+        honorer.id = "CONV_HONORER";
+        honorer.name = "Honorer";
+        honorer.description = "Exprimer admiration et respect";
+        honorer.category = "exprimer";
+        honorer.projection.emotional_forecast = 0.85;
+        honorer.projection.goal_alignment = 0.8;
+        honorer.projection.uncertainty = 0.1;
+        honorer.projection.risk = 0.05;
+        actions.push_back(honorer);
+    }
+    // Émotions de CALME → Apprécier
+    else if (dominant == "Calme" || dominant == "Soulagement" || dominant == "Appréciation esthétique") {
+        ActionOption apprecier;
+        apprecier.id = "CONV_APPRECIER";
+        apprecier.name = "Apprecier";
+        apprecier.description = "Savourer le moment present";
+        apprecier.category = "attendre";
+        apprecier.projection.emotional_forecast = 0.7;
+        apprecier.projection.goal_alignment = 0.75;
+        apprecier.projection.uncertainty = 0.1;
+        apprecier.projection.risk = 0.02;
+        actions.push_back(apprecier);
+    }
+    // Émotions de CONFUSION → Clarifier
+    else if (dominant == "Confusion" || dominant == "Gêne") {
+        ActionOption clarifier;
+        clarifier.id = "CONV_CLARIFIER";
+        clarifier.name = "Clarifier";
+        clarifier.description = "Chercher a comprendre et clarifier";
+        clarifier.category = "agir";
+        clarifier.projection.emotional_forecast = 0.6;
+        clarifier.projection.goal_alignment = 0.85;
+        clarifier.projection.uncertainty = 0.25;
+        clarifier.projection.risk = 0.1;
+        actions.push_back(clarifier);
+    }
+    // Émotions de DÉGOÛT → Rejeter
+    else if (dominant == "Dégoût") {
+        ActionOption rejeter;
+        rejeter.id = "CONV_REJETER";
+        rejeter.name = "Rejeter";
+        rejeter.description = "Exprimer son desaccord ou rejet";
+        rejeter.category = "proteger";
+        rejeter.projection.emotional_forecast = 0.5;
+        rejeter.projection.goal_alignment = 0.7;
+        rejeter.projection.uncertainty = 0.2;
+        rejeter.projection.risk = 0.15;
+        actions.push_back(rejeter);
+    }
+    // Émotions d'EXCITATION → S'enthousiasmer
+    else if (dominant == "Excitation") {
+        ActionOption enthousiasmer;
+        enthousiasmer.id = "CONV_ENTHOUSIASMER";
+        enthousiasmer.name = "S'enthousiasmer";
+        enthousiasmer.description = "Partager son excitation et enthousiasme";
+        enthousiasmer.category = "exprimer";
+        enthousiasmer.projection.emotional_forecast = 0.9;
+        enthousiasmer.projection.goal_alignment = 0.75;
+        enthousiasmer.projection.uncertainty = 0.15;
+        enthousiasmer.projection.risk = 0.1;
+        actions.push_back(enthousiasmer);
+    }
+    // Émotions d'ENNUI → Stimuler
+    else if (dominant == "Ennui") {
+        ActionOption stimuler;
+        stimuler.id = "CONV_STIMULER";
+        stimuler.name = "Stimuler";
+        stimuler.description = "Proposer quelque chose d'interessant";
+        stimuler.category = "agir";
+        stimuler.projection.emotional_forecast = 0.65;
+        stimuler.projection.goal_alignment = 0.8;
+        stimuler.projection.uncertainty = 0.2;
+        stimuler.projection.risk = 0.1;
+        actions.push_back(stimuler);
+    }
+    // Émotions de SYMPATHIE → Compatir
+    else if (dominant == "Sympathie") {
+        ActionOption compatir;
+        compatir.id = "CONV_COMPATIR";
+        compatir.name = "Compatir";
+        compatir.description = "Montrer de l'empathie et du soutien";
+        compatir.category = "soutenir";
+        compatir.projection.emotional_forecast = 0.75;
+        compatir.projection.goal_alignment = 0.85;
+        compatir.projection.uncertainty = 0.1;
+        compatir.projection.risk = 0.05;
+        actions.push_back(compatir);
     }
 
     return actions;
@@ -1718,6 +1838,13 @@ std::string MCEEEngine::generateEmotionalResponse(
                       << response.tokens_total << " tokens, "
                       << response.generation_time_ms << "ms\n";
         }
+
+        // Vérifier si un résumé automatique doit être généré
+        if (llm_client_->shouldSummarize()) {
+            std::cout << "[MCEEEngine] ⏰ Déclenchement résumé automatique...\n";
+            llm_client_->summarizeConversation();
+        }
+
         return response.content;
     } else {
         std::cerr << "[MCEEEngine] Erreur LLM: " << response.error_message << "\n";
