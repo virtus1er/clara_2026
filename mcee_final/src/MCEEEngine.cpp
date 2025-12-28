@@ -1372,6 +1372,139 @@ DecisionResult MCEEEngine::makeDecision(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// GÉNÉRATION DYNAMIQUE D'ACTIONS CONVERSATIONNELLES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+std::vector<ActionOption> MCEEEngine::generateConversationalActions() const {
+    std::vector<ActionOption> actions;
+
+    // Récupérer l'état émotionnel
+    EmotionalState state;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        state = current_state_;
+    }
+
+    // Trouver l'émotion dominante
+    size_t dominant_idx = 0;
+    double dominant_score = 0.0;
+    for (size_t i = 0; i < NUM_EMOTIONS; ++i) {
+        if (state.emotions[i] > dominant_score) {
+            dominant_score = state.emotions[i];
+            dominant_idx = i;
+        }
+    }
+    std::string dominant = EMOTION_NAMES[dominant_idx];
+
+    // Récupérer le sentiment
+    double Ft = 0.0;
+    if (conscience_engine_) {
+        Ft = conscience_engine_->getCurrentState().sentiment;
+    }
+
+    // Actions de base (toujours disponibles)
+    ActionOption ecouter;
+    ecouter.id = "CONV_ECOUTER";
+    ecouter.name = "Ecouter";
+    ecouter.description = "Ecouter attentivement et montrer de l'empathie";
+    ecouter.category = "attendre";
+    ecouter.projection.emotional_forecast = 0.3;
+    ecouter.projection.goal_alignment = 0.5;
+    actions.push_back(ecouter);
+
+    ActionOption questionner;
+    questionner.id = "CONV_QUESTIONNER";
+    questionner.name = "Questionner";
+    questionner.description = "Poser des questions pour mieux comprendre";
+    questionner.category = "agir";
+    questionner.projection.emotional_forecast = 0.2;
+    questionner.projection.goal_alignment = 0.4;
+    actions.push_back(questionner);
+
+    // Actions basées sur le sentiment
+    if (Ft > 0.2) {
+        // Sentiment positif
+        ActionOption partager;
+        partager.id = "CONV_PARTAGER";
+        partager.name = "Partager";
+        partager.description = "Partager sa joie et son enthousiasme";
+        partager.category = "agir";
+        partager.projection.emotional_forecast = 0.7;
+        partager.projection.goal_alignment = 0.6;
+        actions.push_back(partager);
+
+        ActionOption encourager;
+        encourager.id = "CONV_ENCOURAGER";
+        encourager.name = "Encourager";
+        encourager.description = "Encourager et soutenir";
+        encourager.category = "agir";
+        encourager.projection.emotional_forecast = 0.6;
+        encourager.projection.goal_alignment = 0.7;
+        actions.push_back(encourager);
+    } else if (Ft < -0.2) {
+        // Sentiment négatif
+        ActionOption reconforter;
+        reconforter.id = "CONV_RECONFORTER";
+        reconforter.name = "Reconforter";
+        reconforter.description = "Apporter du réconfort et de la compassion";
+        reconforter.category = "agir";
+        reconforter.projection.emotional_forecast = 0.5;
+        reconforter.projection.goal_alignment = 0.8;
+        actions.push_back(reconforter);
+
+        ActionOption rassurer;
+        rassurer.id = "CONV_RASSURER";
+        rassurer.name = "Rassurer";
+        rassurer.description = "Rassurer et apaiser les inquietudes";
+        rassurer.category = "agir";
+        rassurer.projection.emotional_forecast = 0.4;
+        rassurer.projection.goal_alignment = 0.7;
+        actions.push_back(rassurer);
+    }
+
+    // Actions basées sur l'émotion dominante
+    if (dominant == "Peur" || dominant == "Anxiete") {
+        ActionOption proteger;
+        proteger.id = "CONV_PROTEGER";
+        proteger.name = "Proteger";
+        proteger.description = "Offrir protection et securite";
+        proteger.category = "agir";
+        proteger.projection.emotional_forecast = 0.6;
+        proteger.projection.goal_alignment = 0.9;
+        actions.push_back(proteger);
+    } else if (dominant == "Curiosite" || dominant == "Interet") {
+        ActionOption explorer;
+        explorer.id = "CONV_EXPLORER";
+        explorer.name = "Explorer";
+        explorer.description = "Explorer le sujet ensemble";
+        explorer.category = "agir";
+        explorer.projection.emotional_forecast = 0.5;
+        explorer.projection.goal_alignment = 0.6;
+        actions.push_back(explorer);
+    } else if (dominant == "Joie" || dominant == "Amusement") {
+        ActionOption celebrer;
+        celebrer.id = "CONV_CELEBRER";
+        celebrer.name = "Celebrer";
+        celebrer.description = "Celebrer et partager la joie";
+        celebrer.category = "agir";
+        celebrer.projection.emotional_forecast = 0.8;
+        celebrer.projection.goal_alignment = 0.5;
+        actions.push_back(celebrer);
+    } else if (dominant == "Tristesse") {
+        ActionOption accompagner;
+        accompagner.id = "CONV_ACCOMPAGNER";
+        accompagner.name = "Accompagner";
+        accompagner.description = "Accompagner dans la tristesse";
+        accompagner.category = "attendre";
+        accompagner.projection.emotional_forecast = 0.4;
+        accompagner.projection.goal_alignment = 0.8;
+        actions.push_back(accompagner);
+    }
+
+    return actions;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // GÉNÉRATION DE RÉPONSE ÉMOTIONNELLE (LLM)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1474,7 +1607,11 @@ std::string MCEEEngine::generateEmotionalResponse(
 
     // 1c. Ajouter le contexte de décision réfléchie (DecisionEngine)
     if (decision_engine_) {
-        auto decision = makeDecision("conversation");
+        // Générer dynamiquement les actions conversationnelles
+        auto conv_actions = generateConversationalActions();
+
+        // Prendre une décision avec ces actions
+        auto decision = makeDecision("conversation", conv_actions);
         context.decision_confidence = decision.confidence;
 
         // Extraire les conflits d'objectifs
@@ -1485,7 +1622,8 @@ std::string MCEEEngine::generateEmotionalResponse(
 
         if (!quiet_mode_) {
             std::cout << "[MCEEEngine] κ(t)=" << std::fixed << std::setprecision(2)
-                      << context.decision_confidence;
+                      << context.decision_confidence
+                      << " D(t)=" << decision.action_name;
             if (!context.goal_conflicts.empty()) {
                 std::cout << " (conflits: " << context.goal_conflicts.size() << ")";
             }

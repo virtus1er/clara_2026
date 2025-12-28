@@ -342,6 +342,13 @@ public:
     );
 
     /**
+     * @brief Génère dynamiquement des actions conversationnelles
+     * basées sur l'état émotionnel actuel
+     * @return Liste d'actions adaptées
+     */
+    std::vector<ActionOption> generateConversationalActions() const;
+
+    /**
      * @brief Envoie un feedback sur le pattern actuel
      * @param feedback Score [-1, 1]
      */
