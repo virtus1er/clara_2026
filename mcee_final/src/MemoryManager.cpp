@@ -29,23 +29,10 @@ bool MemoryManager::setNeo4jConfig(const Neo4jClientConfig& config) {
     if (neo4j_client_->connect()) {
         neo4j_enabled_ = true;
 
-        // Créer une session dans Neo4j de manière asynchrone
-        // pour ne pas bloquer le démarrage du MCEE
-        std::cout << "[MemoryManager] Neo4j connecté, création de session asynchrone...\n";
-
-        // Utiliser createSessionAsync pour créer la session sans bloquer
-        neo4j_client_->createSessionAsync("SERENITE",
-            [this](const Neo4jResponse& response) {
-                if (response.success && response.data.contains("id")) {
-                    neo4j_session_id_ = response.data["id"].get<std::string>();
-                    std::cout << "[MemoryManager] Session Neo4j créée: " << neo4j_session_id_ << "\n";
-                } else {
-                    std::cerr << "[MemoryManager] Échec création session Neo4j: " << response.error << "\n";
-                    // Générer un ID local en cas d'échec
-                    neo4j_session_id_ = "LOCAL_SESSION_" + std::to_string(
-                        std::chrono::system_clock::now().time_since_epoch().count());
-                }
-            });
+        // Note: Ne pas créer de session MCT au démarrage - les sessions sont créées
+        // uniquement quand des données sont effectivement stockées via recordMemory().
+        // Cela évite de créer des nœuds MCT/Session vides dans Neo4j.
+        std::cout << "[MemoryManager] Neo4j connecté (pas de session créée au démarrage)\n";
 
         return true;
     }
