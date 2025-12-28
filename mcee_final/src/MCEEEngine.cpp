@@ -1472,6 +1472,27 @@ std::string MCEEEngine::generateEmotionalResponse(
         }
     }
 
+    // 1c. Ajouter le contexte de décision réfléchie (DecisionEngine)
+    if (decision_engine_) {
+        auto decision = makeDecision("conversation");
+        context.decision_confidence = decision.confidence;
+
+        // Extraire les conflits d'objectifs
+        for (const auto& conflict : decision.conflicts) {
+            std::string conflict_desc = conflict.goal1_name + " vs " + conflict.goal2_name;
+            context.goal_conflicts.push_back(conflict_desc);
+        }
+
+        if (!quiet_mode_) {
+            std::cout << "[MCEEEngine] κ(t)=" << std::fixed << std::setprecision(2)
+                      << context.decision_confidence;
+            if (!context.goal_conflicts.empty()) {
+                std::cout << " (conflits: " << context.goal_conflicts.size() << ")";
+            }
+            std::cout << "\n";
+        }
+    }
+
     // 2. Enrichir avec la recherche mémoire (si disponible et si lemmas fournis)
     bool memory_found = false;
     if (hybrid_search_ && !lemmas.empty()) {

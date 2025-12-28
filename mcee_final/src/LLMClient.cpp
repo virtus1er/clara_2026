@@ -413,6 +413,14 @@ std::string LLMClient::buildUserPrompt(const std::string& question, const LLMCon
         oss << "- Résilience Rs(t): " << std::fixed << std::setprecision(2)
             << context.resilience << "\n";
 
+        // Confiance décisionnelle
+        oss << "- Confiance κ(t): " << std::fixed << std::setprecision(2)
+            << context.decision_confidence << " (";
+        if (context.decision_confidence >= 0.7) oss << "sûre de toi";
+        else if (context.decision_confidence >= 0.4) oss << "plutôt confiante";
+        else oss << "incertaine, exploratoire";
+        oss << ")\n";
+
         // Conflits d'objectifs
         if (!context.goal_conflicts.empty()) {
             oss << "- Tensions internes: ";
