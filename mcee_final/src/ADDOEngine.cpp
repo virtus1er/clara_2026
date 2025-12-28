@@ -328,9 +328,9 @@ double ADDOEngine::getCurrentGoal() const {
     return current_state_.G;
 }
 
-const GoalState& ADDOEngine::getCurrentState() const {
+GoalState ADDOEngine::getCurrentState() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return current_state_;
+    return current_state_;  // Copie thread-safe
 }
 
 double ADDOEngine::getResilience() const {

@@ -162,9 +162,9 @@ public:
     [[nodiscard]] double getCurrentGoal() const;
 
     /**
-     * @brief Retourne l'état complet
+     * @brief Retourne l'état complet (copie thread-safe)
      */
-    [[nodiscard]] const GoalState& getCurrentState() const;
+    [[nodiscard]] GoalState getCurrentState() const;
 
     /**
      * @brief Retourne la résilience Rs(t)
