@@ -346,7 +346,7 @@ public:
      * basées sur l'état émotionnel actuel
      * @return Liste d'actions adaptées
      */
-    std::vector<ActionOption> generateConversationalActions() const;
+    std::vector<ActionOption> generateConversationalActions();
 
     /**
      * @brief Envoie un feedback sur le pattern actuel

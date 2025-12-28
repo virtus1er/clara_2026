@@ -1375,7 +1375,7 @@ DecisionResult MCEEEngine::makeDecision(
 // GÉNÉRATION DYNAMIQUE D'ACTIONS CONVERSATIONNELLES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-std::vector<ActionOption> MCEEEngine::generateConversationalActions() const {
+std::vector<ActionOption> MCEEEngine::generateConversationalActions() {
     std::vector<ActionOption> actions;
 
     // Récupérer l'état émotionnel
